@@ -82,4 +82,11 @@ export async function runCustomPrediction(payload: Record<string, any>) {
   return res.json();
 }
 
+export async function fetchSensorStream(limit: number = 40) {
+  const res = await fetch(`${API_BASE}/sensors/stream?limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch sensor stream");
+  return res.json();
+}
+
+
 

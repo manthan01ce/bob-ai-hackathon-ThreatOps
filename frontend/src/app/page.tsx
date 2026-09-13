@@ -1,10 +1,9 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import {
   AlertTriangle,
-  BatteryWarning,
   Zap,
   Users,
   Map as MapIcon,
@@ -14,20 +13,26 @@ import {
   Search,
   Bell,
   CloudRain,
-  Settings,
   Wrench,
   CheckCircle,
   Clock,
   ChevronRight,
-  ChevronDown,
   RefreshCw,
   Cpu,
   Sliders,
   Play,
-  Filter,
   ShieldAlert,
-  Radio,
   Check,
+  X,
+  Send,
+  Calendar,
+  Truck,
+  Plus,
+  AlertCircle,
+  Radio,
+  FileText,
+  HelpCircle,
+  ExternalLink,
 } from "lucide-react";
 import {
   LineChart,
@@ -37,8 +42,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  BarChart,
-  Bar,
 } from "recharts";
 import {
   fetchSummary,
@@ -54,10 +57,80 @@ import {
   fetchCrews,
   runCustomPrediction,
   fetchModelInfo,
+  fetchSensorStream,
 } from "@/lib/api";
 
 // Dynamically import Leaflet Map (SSR: false)
 const GridMap = dynamic(() => import("@/components/GridMap"), { ssr: false });
+
+// Initial Work Orders dataset
+const INITIAL_WORK_ORDERS = [
+  {
+    id: "WO-2026-104",
+    asset_id: "SS-2216",
+    asset_type: "substation",
+    district: "Ahmedabad",
+    type: "Emergency DGA Inspection",
+    priority: "P1 - CRITICAL",
+    priority_num: 1,
+    assigned_crew: "Alpha Rapid Response (Crew-1)",
+    scheduled_date: "Today, 14:00",
+    status: "IN_PROGRESS",
+    notes: "Thermal overheating on 220kV primary winding. Redundant feeder prepped.",
+  },
+  {
+    id: "WO-2026-103",
+    asset_id: "PP-4001",
+    asset_type: "power_plant",
+    district: "Kutch",
+    type: "Buchholz Relay Recalibration",
+    priority: "P1 - CRITICAL",
+    priority_num: 1,
+    assigned_crew: "Bravo Coastal EHV (Crew-2)",
+    scheduled_date: "Today, 17:30",
+    status: "SCHEDULED",
+    notes: "Arcing threshold alarm triggered. Oil sampling kit required.",
+  },
+  {
+    id: "WO-2026-098",
+    asset_id: "TR-1044",
+    asset_type: "transformer",
+    district: "Surat",
+    type: "Vibration Dampener Replacement",
+    priority: "P2 - HIGH",
+    priority_num: 2,
+    assigned_crew: "Delta North Industrial (Crew-4)",
+    scheduled_date: "Tomorrow, 09:00",
+    status: "SCHEDULED",
+    notes: "Mechanical resonance measured at 6.8 mm/s. Core loose bracket.",
+  },
+  {
+    id: "WO-2026-095",
+    asset_id: "SS-1180",
+    asset_type: "substation",
+    district: "Rajkot",
+    type: "Oil Dielectric Filtration",
+    priority: "P3 - MEDIUM",
+    priority_num: 3,
+    assigned_crew: "Echo Saurashtra Support (Crew-5)",
+    scheduled_date: "16 Sep 2026",
+    status: "PENDING_PARTS",
+    notes: "Dielectric rigidity 38kV. Moisture filtration scheduled.",
+  },
+  {
+    id: "WO-2026-088",
+    asset_id: "TR-0892",
+    asset_type: "transformer",
+    district: "Vadodara",
+    type: "Quarterly Routine PM",
+    priority: "P4 - LOW",
+    priority_num: 4,
+    assigned_crew: "Foxtrot Central Hub (Crew-6)",
+    scheduled_date: "Yesterday",
+    status: "COMPLETED",
+    notes: "Bushings cleaned, terminal bolts torqued. All parameters normal.",
+  },
+];
 
 export default function Dashboard() {
   // Navigation State
@@ -80,11 +153,43 @@ export default function Dashboard() {
   const [incidentsList, setIncidentsList] = useState<any[]>([]);
   const [crewsList, setCrewsList] = useState<any[]>([]);
   const [modelInfo, setModelInfo] = useState<any>(null);
+  const [sensorStream, setSensorStream] = useState<any[]>([]);
+
+  // Interactive Work Orders State
+  const [workOrders, setWorkOrders] = useState<any[]>(INITIAL_WORK_ORDERS);
+  const [woFilter, setWoFilter] = useState<string>("ALL");
+  const [showCreateWO, setShowCreateWO] = useState<boolean>(false);
+  const [newWOAsset, setNewWOAsset] = useState<string>("SS-2216");
+  const [newWOType, setNewWOType] = useState<string>("Preventative Maintenance");
+  const [newWOPriority, setNewWOPriority] = useState<string>("P2 - HIGH");
+
+  // Dispatch Modal State
+  const [dispatchModal, setDispatchModal] = useState<{
+    isOpen: boolean;
+    crew: any | null;
+    incident: any | null;
+  }>({
+    isOpen: false,
+    crew: null,
+    incident: null,
+  });
+
+  // Notification Drawer State
+  const [showNotifications, setShowNotifications] = useState<boolean>(false);
+
+  // Toast Banner State
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToastMessage = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 4500);
+  };
 
   // Search & Filter
   const [searchTerm, setSearchTerm] = useState<string>("");
 
   // AI Live Simulator State (for Judges)
+  const [simEquipmentType, setSimEquipmentType] = useState<"SS" | "TR">("SS");
   const [simTemp, setSimTemp] = useState<number>(55);
   const [simOilTemp, setSimOilTemp] = useState<number>(50);
   const [simVibration, setSimVibration] = useState<number>(2.1);
@@ -101,7 +206,7 @@ export default function Dashboard() {
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  // Focus and inspect an asset
+  // Focus and inspect an asset across tabs
   const selectAsset = useCallback(async (assetId: string) => {
     setSelectedAssetId(assetId);
     try {
@@ -174,9 +279,10 @@ export default function Dashboard() {
       fetchIncidents(100).then((data) => setIncidentsList(data)).catch(console.error);
     } else if (activeTab === "crews" && crewsList.length === 0) {
       fetchCrews().then((data) => setCrewsList(data)).catch(console.error);
+    } else if (activeTab === "sensors" && sensorStream.length === 0) {
+      fetchSensorStream(60).then((data) => setSensorStream(data)).catch(console.error);
     }
-  }, [activeTab, assetsList.length, incidentsList.length, crewsList.length]);
-
+  }, [activeTab, assetsList.length, incidentsList.length, crewsList.length, sensorStream.length]);
 
   // Initial load + 15s auto-refresh interval
   useEffect(() => {
@@ -188,15 +294,19 @@ export default function Dashboard() {
   // Trigger Live AI Simulator (For Judges)
   const handleSimulate = async (customPayload?: Record<string, any>) => {
     setSimulating(true);
+    const isTR = simEquipmentType === "TR";
     const payload = customPayload || {
       temperature: simTemp,
       oil_temperature: simOilTemp,
       vibration: simVibration,
       load_percent: simLoad,
-      acetylene: simAcetylene,
-      hydrogen: simHydrogen,
-      ethylene: simEthylene,
-      methane: simMethane,
+      is_tr: isTR,
+      asset_type: isTR ? "transformer" : "substation",
+      // DGA gases omitted/baseline if TR
+      acetylene: isTR ? 0.2 : simAcetylene,
+      hydrogen: isTR ? 15.0 : simHydrogen,
+      ethylene: isTR ? 6.0 : simEthylene,
+      methane: isTR ? 15.0 : simMethane,
     };
 
     try {
@@ -209,966 +319,1937 @@ export default function Dashboard() {
     }
   };
 
-  // Presets for Demo
+  // Presets for Demo (Covers full 0-100% spectrum and TR vs SS)
   const applyPreset = (preset: string) => {
     if (preset === "normal") {
+      setSimEquipmentType("SS");
       setSimTemp(48); setSimOilTemp(42); setSimVibration(1.2); setSimLoad(55);
       setSimAcetylene(0.5); setSimHydrogen(15); setSimEthylene(8); setSimMethane(20);
-      handleSimulate({ temperature: 48, oil_temperature: 42, vibration: 1.2, load_percent: 55, acetylene: 0.5, hydrogen: 15, ethylene: 8, methane: 20 });
+      handleSimulate({
+        temperature: 48, oil_temperature: 42, vibration: 1.2, load_percent: 55,
+        acetylene: 0.5, hydrogen: 15, ethylene: 8, methane: 20, is_tr: false,
+      });
     } else if (preset === "arcing") {
-      setSimTemp(88); setSimOilTemp(82); setSimVibration(3.5); setSimLoad(95);
-      setSimAcetylene(38.0); setSimHydrogen(140); setSimEthylene(110); setSimMethane(85);
-      handleSimulate({ temperature: 88, oil_temperature: 82, vibration: 3.5, load_percent: 95, acetylene: 38.0, hydrogen: 140, ethylene: 110, methane: 85 });
+      setSimEquipmentType("SS");
+      setSimTemp(92); setSimOilTemp(86); setSimVibration(3.8); setSimLoad(98);
+      setSimAcetylene(42.0); setSimHydrogen(180); setSimEthylene(130); setSimMethane(95);
+      handleSimulate({
+        temperature: 92, oil_temperature: 86, vibration: 3.8, load_percent: 98,
+        acetylene: 42.0, hydrogen: 180, ethylene: 130, methane: 95, is_tr: false,
+      });
     } else if (preset === "thermal") {
-      setSimTemp(98); setSimOilTemp(94); setSimVibration(2.8); setSimLoad(118);
-      setSimAcetylene(2.0); setSimHydrogen(60); setSimEthylene(160); setSimMethane(120);
-      handleSimulate({ temperature: 98, oil_temperature: 94, vibration: 2.8, load_percent: 118, acetylene: 2.0, hydrogen: 60, ethylene: 160, methane: 120 });
+      setSimEquipmentType("SS");
+      setSimTemp(102); setSimOilTemp(98); setSimVibration(2.9); setSimLoad(124);
+      setSimAcetylene(2.5); setSimHydrogen(75); setSimEthylene(175); setSimMethane(140);
+      handleSimulate({
+        temperature: 102, oil_temperature: 98, vibration: 2.9, load_percent: 124,
+        acetylene: 2.5, hydrogen: 75, ethylene: 175, methane: 140, is_tr: false,
+      });
     } else if (preset === "mechanical") {
-      setSimTemp(62); setSimOilTemp(58); setSimVibration(6.8); setSimLoad(70);
+      setSimEquipmentType("SS");
+      setSimTemp(64); setSimOilTemp(58); setSimVibration(7.2); setSimLoad(72);
       setSimAcetylene(1.2); setSimHydrogen(30); setSimEthylene(18); setSimMethane(40);
-      handleSimulate({ temperature: 62, oil_temperature: 58, vibration: 6.8, load_percent: 70, acetylene: 1.2, hydrogen: 30, ethylene: 18, methane: 40 });
+      handleSimulate({
+        temperature: 64, oil_temperature: 58, vibration: 7.2, load_percent: 72,
+        acetylene: 1.2, hydrogen: 30, ethylene: 18, methane: 40, is_tr: false,
+      });
+    } else if (preset === "tr_overload") {
+      // Distribution Transformer (No DGA gases required!)
+      setSimEquipmentType("TR");
+      setSimTemp(94); setSimOilTemp(88); setSimVibration(5.8); setSimLoad(118);
+      handleSimulate({
+        temperature: 94, oil_temperature: 88, vibration: 5.8, load_percent: 118,
+        is_tr: true, asset_type: "transformer",
+      });
     }
   };
 
+  // Open Dispatch Modal for Crew
+  const openDispatchForCrew = (crew: any) => {
+    // Find nearest critical or high alert
+    const targetIncident = alerts[0] || {
+      asset_id: "SS-2216",
+      fault_type: "Thermal Overheating",
+      district: "Ahmedabad",
+      severity: "CRITICAL",
+    };
+    setDispatchModal({
+      isOpen: true,
+      crew: crew,
+      incident: targetIncident,
+    });
+  };
+
+  // Open Dispatch Modal for Alert
+  const openDispatchForAlert = (alertItem: any) => {
+    // Find available crew
+    const availableCrew = crewsList.find((c) => c.available) || {
+      crew_id: "CRW-01",
+      name: "Alpha Rapid Response (Crew-1)",
+      zone: "Central Gujarat",
+      skill_level: "LEAD_ENGINEER",
+    };
+    setDispatchModal({
+      isOpen: true,
+      crew: availableCrew,
+      incident: alertItem,
+    });
+  };
+
+  // Confirm Dispatch Execution
+  const handleConfirmDispatch = () => {
+    if (!dispatchModal.crew || !dispatchModal.incident) return;
+    const crewName = dispatchModal.crew.name;
+    const assetId = dispatchModal.incident.asset_id;
+
+    // Update crewsList state
+    setCrewsList((prev) =>
+      prev.map((c) => (c.crew_id === dispatchModal.crew.crew_id ? { ...c, available: false } : c))
+    );
+
+    // Create a new work order automatically
+    const newWO = {
+      id: `WO-2026-${Math.floor(100 + Math.random() * 900)}`,
+      asset_id: assetId,
+      asset_type: dispatchModal.incident.asset_type || "substation",
+      district: dispatchModal.incident.district || "Gujarat",
+      type: `Emergency Response: ${dispatchModal.incident.fault_type || "Electrical Anomaly"}`,
+      priority: "P1 - CRITICAL",
+      priority_num: 1,
+      assigned_crew: crewName,
+      scheduled_date: "Dispatched Now",
+      status: "IN_PROGRESS",
+      notes: "Field unit deployed via Automated Dispatch Center.",
+    };
+    setWorkOrders((prev) => [newWO, ...prev]);
+
+    setDispatchModal({ isOpen: false, crew: null, incident: null });
+    showToastMessage(`⚡ ${crewName} successfully dispatched to ${assetId}! ETA: 22 mins.`);
+  };
+
+  // Create Work Order
+  const handleCreateWorkOrder = () => {
+    const newId = `WO-2026-${Math.floor(200 + Math.random() * 800)}`;
+    const newEntry = {
+      id: newId,
+      asset_id: newWOAsset,
+      asset_type: newWOAsset.startsWith("TR-") ? "transformer" : "substation",
+      district: "Ahmedabad",
+      type: newWOType,
+      priority: newWOPriority,
+      priority_num: newWOPriority.startsWith("P1") ? 1 : 2,
+      assigned_crew: "Alpha Rapid Response (Crew-1)",
+      scheduled_date: "Scheduled",
+      status: "SCHEDULED",
+      notes: "Manually registered in Grid Maintenance Management.",
+    };
+    setWorkOrders((prev) => [newEntry, ...prev]);
+    setShowCreateWO(false);
+    showToastMessage(`✅ Work Order ${newId} created for ${newWOAsset}`);
+  };
+
+  // Complete Work Order
+  const handleCompleteWO = (woId: string) => {
+    setWorkOrders((prev) =>
+      prev.map((w) => (w.id === woId ? { ...w, status: "COMPLETED" } : w))
+    );
+    showToastMessage(`Work Order ${woId} marked as completed.`);
+  };
+
+  // Focus on map handler for alerts and rows
+  const handleFocusOnMap = (assetId: string) => {
+    selectAsset(assetId);
+    setActiveTab("map");
+    if (showNotifications) setShowNotifications(false);
+  };
+
+  // Filter markers based on selected category
+  const filteredMarkers = useMemo(() => {
+    return markers.filter((m) => {
+      if (filterType === "CRITICAL") return m.risk_level === "CRITICAL";
+      if (filterType === "HIGH") return m.risk_level === "HIGH" || m.risk_level === "CRITICAL";
+      if (filterType === "POWER_PLANT") return m.asset_type === "power_plant" || m.asset_id?.startsWith("PP-");
+      if (filterType === "SUBSTATION") return m.asset_type === "substation" || m.asset_id?.startsWith("SS-");
+      if (filterType === "TRANSFORMER") return m.asset_type === "transformer" || m.asset_id?.startsWith("TR-");
+      return true;
+    });
+  }, [markers, filterType]);
+
   if (isLoading) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center bg-black text-[#bbbbbb] gap-3">
-        <div className="w-8 h-8 border-2 border-[#1c69d4] border-t-transparent rounded-full animate-spin" />
-        <div className="font-bold text-xs tracking-widest uppercase">Connecting to Gujarat Power Grid SCADA...</div>
+      <div className="flex h-screen flex-col items-center justify-center bg-[#f2f0eb] text-[#1E3932] gap-3">
+        <div className="w-10 h-10 border-3 border-[#00754A] border-t-transparent rounded-full animate-spin" />
+        <div className="font-bold text-sm tracking-tight text-[#006241]">Initializing Gujarat SCADA Grid &bull; Starbucks Theme...</div>
       </div>
     );
   }
 
-  // Filter markers based on selected category
-  const filteredMarkers = markers.filter((m) => {
-    if (filterType === "CRITICAL") return m.risk_level === "CRITICAL";
-    if (filterType === "HIGH") return m.risk_level === "HIGH" || m.risk_level === "CRITICAL";
-    if (filterType === "POWER_PLANT") return m.asset_type === "power_plant" || m.asset_id?.startsWith("PP-");
-    if (filterType === "SUBSTATION") return m.asset_type === "substation" || m.asset_id?.startsWith("SS-");
-    if (filterType === "TRANSFORMER") return m.asset_type === "transformer" || m.asset_id?.startsWith("TR-");
-    return true;
-  });
-
-
-  const currentWeather = weather.find((w: any) => w.district === "Ahmedabad") || weather[0];
-
   return (
-    <div className="flex h-screen bg-[#000] text-white overflow-hidden text-[11px]">
-      {/* SIDEBAR */}
-      <aside className="w-52 border-r border-[#3c3c3c] flex flex-col flex-shrink-0 bg-[#050505]">
-        <div className="px-4 py-4">
-          <div className="flex items-center gap-1.5 text-base font-bold tracking-tight uppercase">
-            <Zap className="text-[#1c69d4] h-5 w-5" fill="currentColor" />
-            PowerGrid AI
+    <div className="flex h-screen bg-[#f2f0eb] text-[rgba(0,0,0,0.87)] overflow-hidden font-sans">
+      {/* GLOBAL TOAST BANNER */}
+      {toast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] bg-[#1E3932] text-white px-5 py-2.5 rounded-full shadow-lg flex items-center gap-3 animate-in fade-in slide-in-from-top-4 border border-[#00754A]">
+          <CheckCircle className="text-[#cba258]" size={16} />
+          <span className="text-xs font-semibold">{toast}</span>
+          <button onClick={() => setToast(null)} className="text-white/70 hover:text-white">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* LEFT SIDEBAR - HOUSE GREEN (#1E3932) */}
+      <aside className="w-64 bg-[#1E3932] text-white flex flex-col justify-between flex-shrink-0 border-r border-[#1E3932]/50 shadow-md">
+        <div>
+          {/* BRAND HEADER */}
+          <div className="p-4 border-b border-white/10 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-full bg-[#00754A] flex items-center justify-center font-bold text-white shadow-sm">
+                ☕
+              </div>
+              <div>
+                <span className="font-bold tracking-tight text-base text-white">ThreatOps</span>
+                <span className="text-[10px] block text-[#cba258] font-medium tracking-wide">GUJARAT POWER GRID</span>
+              </div>
+            </div>
+            <span className="px-2 py-0.5 rounded-full bg-[#00754A] text-[9px] font-bold text-white tracking-wider">
+              ONLINE
+            </span>
           </div>
-          <p className="text-[9px] text-[#7e7e7e] mt-0.5 uppercase tracking-widest">
-            Predict. Prevent. Keep Grid On.
-          </p>
+
+          {/* NAVIGATION LINKS */}
+          <div className="p-3 space-y-1">
+            <div className="text-[10px] uppercase font-bold text-white/40 tracking-wider px-2 py-1">
+              OPERATIONAL VIEWS
+            </div>
+            <NavItem
+              icon={<LayoutDashboard size={15} />}
+              label="Real-Time Dashboard"
+              active={activeTab === "dashboard"}
+              onClick={() => setActiveTab("dashboard")}
+            />
+            <NavItem
+              icon={<MapIcon size={15} />}
+              label="Interactive Grid Map"
+              active={activeTab === "map"}
+              badge={`${markers.length}`}
+              onClick={() => setActiveTab("map")}
+            />
+            <NavItem
+              icon={<AlertTriangle size={15} />}
+              label="Emergency Alerts"
+              active={activeTab === "alerts"}
+              badge={`${alerts.length}`}
+              badgeColor="bg-[#c82014]"
+              onClick={() => setActiveTab("alerts")}
+            />
+            <NavItem
+              icon={<Wrench size={15} />}
+              label="Maintenance & WOs"
+              active={activeTab === "maintenance"}
+              badge={`${workOrders.filter((w) => w.status !== "COMPLETED").length}`}
+              badgeColor="bg-[#cba258]"
+              onClick={() => setActiveTab("maintenance")}
+            />
+            <NavItem
+              icon={<Truck size={15} />}
+              label="Crew Dispatch & GPS"
+              active={activeTab === "crews"}
+              onClick={() => setActiveTab("crews")}
+            />
+
+            <div className="text-[10px] uppercase font-bold text-white/40 tracking-wider px-2 pt-3 pb-1">
+              AI & SCADA TELEMETRY
+            </div>
+            <NavItem
+              icon={<Cpu size={15} />}
+              label="AI Predictor Studio"
+              active={activeTab === "predictions"}
+              badge="XGBoost"
+              badgeColor="bg-[#00754A]"
+              onClick={() => setActiveTab("predictions")}
+            />
+            <NavItem
+              icon={<Activity size={15} />}
+              label="SCADA Sensor Console"
+              active={activeTab === "sensors"}
+              badge="Live"
+              badgeColor="bg-[#00754A]"
+              onClick={() => setActiveTab("sensors")}
+            />
+            <NavItem
+              icon={<Database size={15} />}
+              label="Asset Inventory"
+              active={activeTab === "assets"}
+              onClick={() => setActiveTab("assets")}
+            />
+            <NavItem
+              icon={<ShieldAlert size={15} />}
+              label="Fault & Incident Log"
+              active={activeTab === "incidents"}
+              onClick={() => setActiveTab("incidents")}
+            />
+          </div>
         </div>
 
-        <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto">
-          <NavItem icon={<LayoutDashboard size={14} />} label="Dashboard" active={activeTab === "dashboard"} onClick={() => setActiveTab("dashboard")} />
-          <NavItem icon={<MapIcon size={14} />} label="Risk Map" active={activeTab === "map"} onClick={() => setActiveTab("map")} />
-          <NavItem icon={<Database size={14} />} label="Assets" active={activeTab === "assets"} onClick={() => setActiveTab("assets")} />
-          <NavItem icon={<Activity size={14} />} label="Sensors" active={activeTab === "sensors"} onClick={() => setActiveTab("sensors")} />
-          <NavItem icon={<AlertTriangle size={14} />} label="Incidents" active={activeTab === "incidents"} onClick={() => setActiveTab("incidents")} />
-          <NavItem icon={<Cpu size={14} className="text-[#1c69d4]" />} label="AI Predictions" active={activeTab === "predictions"} onClick={() => setActiveTab("predictions")} badge="ML" />
-          <div className="mt-4 mb-1 px-2 text-[9px] font-bold text-[#7e7e7e] uppercase tracking-widest">Operations</div>
-          <NavItem icon={<Wrench size={14} />} label="Maintenance" active={activeTab === "maintenance"} onClick={() => setActiveTab("maintenance")} />
-          <NavItem icon={<Users size={14} />} label="Crew Planning" active={activeTab === "crews"} onClick={() => setActiveTab("crews")} />
-          <div className="mt-4 mb-1 px-2 text-[9px] font-bold text-[#7e7e7e] uppercase tracking-widest">System</div>
-          <NavItem icon={<Bell size={14} />} label="Alerts" badge={String(alerts.length)} active={activeTab === "alerts"} onClick={() => setActiveTab("alerts")} />
-        </nav>
-
-        <div className="px-4 py-3 border-t border-[#3c3c3c] bg-[#000]">
-          <div className="text-[9px] text-[#7e7e7e] uppercase tracking-widest mb-1">Grid Reliability</div>
-          <div className="text-lg font-bold text-[#0fa336]">99.82%</div>
-          <div className="text-[9px] text-[#0fa336]">+0.12% this week &bull; Gujarat SLDC</div>
+        {/* BOTTOM METRIC CARD */}
+        <div className="p-3 border-t border-white/10 m-2 rounded-xl bg-white/5">
+          <div className="flex items-center justify-between text-[11px] text-white/70 mb-1">
+            <span>Model Health</span>
+            <span className="text-[#cba258] font-bold">96.3% Acc</span>
+          </div>
+          <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+            <div className="bg-[#00754A] h-full w-[96%]" />
+          </div>
+          <div className="text-[9px] text-white/50 mt-2 flex items-center justify-between">
+            <span>GETCO EHV Grid</span>
+            <span className="text-[#cba258] font-semibold">836 Assets</span>
+          </div>
         </div>
       </aside>
 
-      {/* MAIN CONTENT */}
-      <main className="flex-1 flex flex-col h-full overflow-y-auto bg-[#000]">
-        {/* HEADER */}
-        <header className="h-12 border-b border-[#3c3c3c] flex items-center justify-between px-6 bg-[#000]/90 backdrop-blur-md sticky top-0 z-20 flex-shrink-0">
-          <div className="flex-1 max-w-sm relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#7e7e7e]" size={12} />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search transformers, substations, or zones..."
-              className="w-full bg-[#1a1a1a] border border-[#3c3c3c] py-1.5 pl-8 pr-3 text-[11px] focus:outline-none focus:border-white transition-colors"
-            />
+      {/* MAIN CONTENT AREA */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#f2f0eb]">
+        {/* TOP NAVBAR - HOUSE GREEN ACCENT (#1E3932) */}
+        <header className="h-14 bg-[#1E3932] text-white flex items-center justify-between px-6 shadow-sm z-20 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <h1 className="text-base font-bold tracking-tight text-white flex items-center gap-2">
+              <span>ThreatOps PowerGrid</span>
+              <span className="text-xs font-normal text-white/60">/</span>
+              <span className="text-xs font-semibold text-[#cba258] capitalize">
+                {activeTab === "dashboard" ? "Real-Time Overview" : activeTab.replace(/_/g, " ")}
+              </span>
+            </h1>
           </div>
 
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2 bg-[#161616] border border-[#333] px-2.5 py-1">
-              <div className={`w-2 h-2 rounded-full ${isRefreshing ? "bg-[#f4b400] animate-spin" : "bg-[#0fa336] animate-pulse"}`} />
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#bbb]">
-                {isRefreshing ? "SYNCING..." : "LIVE TELEMETRY"}
-              </span>
-              <span className="text-[9px] text-[#666]">
-                {lastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-              </span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 text-xs text-white/70 bg-white/10 px-3 py-1 rounded-full">
+              <span className="w-2 h-2 rounded-full bg-[#cba258] animate-pulse" />
+              <span>Gujarat SCADA Synced</span>
             </div>
 
-            <div className="flex items-center gap-2">
-              <CloudRain className="text-[#bbbbbb]" size={14} />
-              <div>
-                <div className="font-bold text-[11px]">{currentWeather?.avg_temp ? Math.round(currentWeather.avg_temp) : 28}°C</div>
-                <div className="text-[9px] text-[#bbbbbb]">Partly cloudy</div>
-              </div>
-            </div>
+            <button
+              onClick={() => loadData(true)}
+              disabled={isRefreshing}
+              className="sb-pill-btn sb-btn-white-outline !py-1 !px-3 text-xs"
+            >
+              <RefreshCw size={12} className={isRefreshing ? "animate-spin" : ""} />
+              <span>{isRefreshing ? "Syncing..." : "Refresh"}</span>
+            </button>
 
-            <div className="flex items-center gap-3 border-l border-[#3c3c3c] pl-6">
-              <div className="relative">
-                <Bell size={14} className="text-[#bbbbbb]" />
-                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-[#e22718] rounded-full" />
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full bg-[#1c69d4] flex items-center justify-center font-bold text-[10px] uppercase">SLDC</div>
-                <div>
-                  <div className="font-bold text-[11px]">System Operator</div>
-                  <div className="text-[9px] text-[#bbbbbb]">Gujarat Energy Trans. Corp.</div>
-                </div>
-              </div>
+            {/* NOTIFICATION BELL BUTTON */}
+            <button
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="relative p-2 rounded-full hover:bg-white/10 text-white transition-colors cursor-pointer"
+              title="Open Notification Center"
+            >
+              <Bell size={18} />
+              {alerts.length > 0 && (
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#c82014] rounded-full ring-2 ring-[#1E3932]" />
+              )}
+            </button>
+
+            <div className="w-8 h-8 rounded-full bg-[#00754A] flex items-center justify-center font-bold text-white text-xs border border-white/20">
+              MO
             </div>
           </div>
         </header>
 
-        {/* VIEW 1: MAIN DASHBOARD */}
-        {activeTab === "dashboard" && (
-          <div className="p-5 space-y-4">
-            <div className="flex justify-between items-end">
-              <div>
-                <h1 className="text-xl font-bold uppercase tracking-tight">Grid Operations Overview</h1>
-                <p className="text-[#bbbbbb] mt-0.5 font-light text-[10px]">
-                  Predictive Outage & Equipment Failure Advisor &bull; MapTiler Dark Vector Engine
-                </p>
+        {/* NOTIFICATION DRAWER OVERLAY */}
+        {showNotifications && (
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/30 backdrop-blur-sm animate-in fade-in">
+            <div className="w-96 bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+              <div className="p-4 bg-[#1E3932] text-white flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bell size={16} className="text-[#cba258]" />
+                  <span className="font-bold text-sm tracking-tight">Active Grid Notifications</span>
+                </div>
+                <button
+                  onClick={() => setShowNotifications(false)}
+                  className="p-1 rounded-full hover:bg-white/10 text-white"
+                >
+                  <X size={16} />
+                </button>
               </div>
-              <div className="text-right text-[11px] text-[#bbbbbb]">
-                {new Date().toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short", year: "numeric" })} &nbsp;
-                <span className="text-white font-bold text-base">
-                  {new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" })}
-                </span>
+
+              <div className="p-3 bg-[#faf9f6] border-b border-[#e7e5e0] flex items-center justify-between text-xs">
+                <span className="text-gray-600 font-semibold">{alerts.length} Pending Incidents</span>
+                <button
+                  onClick={() => showToastMessage("All alerts acknowledged")}
+                  className="text-[#00754A] font-bold hover:underline"
+                >
+                  Mark all read
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {alerts.map((alert: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-xl border border-[#e7e5e0] hover:border-[#00754A] transition-all bg-white shadow-xs"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold text-xs text-[#1E3932]">{alert.asset_id}</span>
+                      <span
+                        className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                          alert.severity === "CRITICAL"
+                            ? "bg-[#c82014] text-white"
+                            : "bg-[#fbbc05] text-black"
+                        }`}
+                      >
+                        {alert.severity}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-700 font-medium">{alert.fault_type}</div>
+                    <div className="text-[10px] text-gray-500 mt-1">
+                      {(alert.customers_affected || 0).toLocaleString()} customers at risk &bull;{" "}
+                      {new Date(alert.started_at).toLocaleDateString()}
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-gray-100 flex gap-2">
+                      <button
+                        onClick={() => handleFocusOnMap(alert.asset_id)}
+                        className="sb-pill-btn sb-btn-outline !py-1 !px-2.5 text-[10px]"
+                      >
+                        Focus on Map
+                      </button>
+                      <button
+                        onClick={() => openDispatchForAlert(alert)}
+                        className="sb-pill-btn sb-btn-primary !py-1 !px-2.5 text-[10px]"
+                      >
+                        Dispatch Crew
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
+          </div>
+        )}
 
-            <div className="m-stripe" />
+        {/* WORK ORDER CREATION MODAL */}
+        {showCreateWO && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+            <div className="bg-white w-full max-w-md rounded-xl p-6 shadow-2xl border border-[#e7e5e0] animate-in zoom-in-95">
+              <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-3">
+                <h3 className="font-bold text-base text-[#1E3932]">Schedule New Work Order</h3>
+                <button onClick={() => setShowCreateWO(false)} className="text-gray-400 hover:text-gray-600">
+                  <X size={18} />
+                </button>
+              </div>
 
-            {/* KPI CARDS */}
-            <div className="grid grid-cols-5 gap-3">
-              <KpiCard icon={<Database size={16} />} title="Total Assets" value={summary?.total_assets?.toLocaleString()} trend="200 TR + 30 Sub" trendUp />
-              <KpiCard icon={<AlertTriangle size={16} className="text-[#e22718]" />} title="Critical Assets" value={summary?.critical_assets} sub="Immediate dispatch required" />
-              <KpiCard icon={<BatteryWarning size={16} className="text-[#f4b400]" />} title="At-Risk Assets" value={summary?.at_risk_assets} trend="High & Critical" />
-              <KpiCard icon={<Zap size={16} className="text-[#1c69d4]" />} title="AI Predicted Failures" value={summary?.critical_assets ? Math.round(summary.critical_assets * 0.4) : "6"} sub="Within next 48 hours" />
-              <KpiCard icon={<Users size={16} className="text-[#0fa336]" />} title="Customers At Risk" value={summary?.customers_at_risk?.toLocaleString()} sub="Across at-risk substations" />
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-gray-700 font-semibold mb-1">Facility Asset ID</label>
+                  <input
+                    type="text"
+                    value={newWOAsset}
+                    onChange={(e) => setNewWOAsset(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg p-2 focus:border-[#00754A] focus:outline-hidden"
+                    placeholder="e.g. SS-2216 or TR-1044"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-700 font-semibold mb-1">Work Order Type</label>
+                  <select
+                    value={newWOType}
+                    onChange={(e) => setNewWOType(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg p-2 focus:border-[#00754A] focus:outline-hidden"
+                  >
+                    <option>Preventative Maintenance (Quarterly)</option>
+                    <option>Emergency DGA Oil Treatment</option>
+                    <option>Vibration & Bearing Dampening</option>
+                    <option>Thermal Winding Recalibration</option>
+                    <option>Relay & Breaker Testing</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-gray-700 font-semibold mb-1">Priority Classification</label>
+                  <select
+                    value={newWOPriority}
+                    onChange={(e) => setNewWOPriority(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg p-2 focus:border-[#00754A] focus:outline-hidden"
+                  >
+                    <option>P1 - CRITICAL (Immediate Dispatch)</option>
+                    <option>P2 - HIGH (24h Window)</option>
+                    <option>P3 - MEDIUM (Scheduled PM)</option>
+                    <option>P4 - LOW (Routine)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  onClick={() => setShowCreateWO(false)}
+                  className="sb-pill-btn sb-btn-outline"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateWorkOrder}
+                  className="sb-pill-btn sb-btn-primary"
+                >
+                  Create Work Order
+                </button>
+              </div>
             </div>
+          </div>
+        )}
 
-            {/* MIDDLE ROW */}
-            <div className="grid grid-cols-3 gap-4">
-              {/* MAP */}
-              <div className="col-span-2 bg-[#1a1a1a] border border-[#3c3c3c] p-4 flex flex-col" style={{ height: 390 }}>
-                <div className="flex justify-between items-center mb-3">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-bold uppercase">Grid Risk Map (Gujarat)</h2>
-                    <span className="text-[9px] bg-[#222] border border-[#444] px-1.5 py-0.5 text-[#888] uppercase">
-                      MapTiler Dataviz Dark
+        {/* CREW DISPATCH CONFIRMATION MODAL */}
+        {dispatchModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+            <div className="bg-white w-full max-w-lg rounded-xl p-6 shadow-2xl border border-[#e7e5e0] animate-in zoom-in-95">
+              <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-[#00754A] text-white flex items-center justify-center">
+                    <Truck size={16} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-[#1E3932]">Confirm Crew Deployment</h3>
+                    <p className="text-[11px] text-gray-500">Automated GETCO Fleet Dispatch</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setDispatchModal({ isOpen: false, crew: null, incident: null })}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs bg-[#faf9f6] p-4 rounded-xl border border-gray-200 mb-4">
+                <div className="flex justify-between border-b border-gray-200 pb-2">
+                  <span className="text-gray-500">Field Unit:</span>
+                  <span className="font-bold text-[#1E3932]">{dispatchModal.crew?.name}</span>
+                </div>
+                <div className="flex justify-between border-b border-gray-200 pb-2">
+                  <span className="text-gray-500">Operational Zone:</span>
+                  <span className="font-semibold">{dispatchModal.crew?.zone || "Central Gujarat"}</span>
+                </div>
+                <div className="flex justify-between border-b border-gray-200 pb-2">
+                  <span className="text-gray-500">Target Facility:</span>
+                  <span className="font-bold text-[#c82014]">{dispatchModal.incident?.asset_id}</span>
+                </div>
+                <div className="flex justify-between border-b border-gray-200 pb-2">
+                  <span className="text-gray-500">Reported Incident:</span>
+                  <span className="font-semibold">{dispatchModal.incident?.fault_type || "Critical Overheating"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Estimated Travel Time:</span>
+                  <span className="font-bold text-[#00754A]">22 Minutes (Priority Siren)</span>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setDispatchModal({ isOpen: false, crew: null, incident: null })}
+                  className="sb-pill-btn sb-btn-outline"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDispatch}
+                  className="sb-pill-btn sb-btn-primary"
+                >
+                  <Send size={13} /> Confirm &amp; Dispatch Fleet
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SCROLLABLE TAB VIEW CONTAINER */}
+        <main className="flex-1 overflow-y-auto p-5">
+          {/* VIEW 1: REAL-TIME DASHBOARD OVERVIEW */}
+          {activeTab === "dashboard" && (
+            <div className="space-y-5">
+              {/* TOP KPI CARDS (Starbucks White Cards with Soft Shadows) */}
+              <div className="grid grid-cols-4 gap-4">
+                <KpiCard
+                  icon={<Zap className="text-[#00754A]" size={18} />}
+                  title="Total Monitored Facilities"
+                  value={summary?.total_assets || 836}
+                  sub="GETCO Grid: 33 Gujarat Districts"
+                />
+                <KpiCard
+                  icon={<AlertTriangle className="text-[#c82014]" size={18} />}
+                  title="Critical Risk Facilities"
+                  value={summary?.critical_risk_assets || 23}
+                  trend="+2 since 06:00"
+                  trendUp={false}
+                  sub="P1 Emergency Attention Required"
+                />
+                <KpiCard
+                  icon={<Truck className="text-[#00754A]" size={18} />}
+                  title="Available Field Crews"
+                  value={crewsList.filter((c) => c.available).length || 8}
+                  sub="12 Fleet Teams across 6 Zones"
+                />
+                <KpiCard
+                  icon={<Activity className="text-[#cba258]" size={18} />}
+                  title="Live Telemetry Ingestion"
+                  value="31,271"
+                  sub="15-Second Synchronized Polling"
+                />
+              </div>
+
+              {/* SECOND ROW: MAP PREVIEW + WEATHER/ALERTS */}
+              <div className="grid grid-cols-3 gap-4">
+                {/* 2 Cols: Interactive Map Preview */}
+                <div className="col-span-2 sb-card p-4 flex flex-col h-[400px]">
+                  <div className="flex justify-between items-center mb-3">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-sm font-bold tracking-tight text-[#1E3932]">
+                        Gujarat Power Grid Geographic Risk
+                      </h2>
+                      <span className="text-[10px] bg-[#d4e9e2] text-[#006241] font-bold px-2 py-0.5 rounded-full">
+                        836 Assets
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab("map")}
+                      className="text-xs font-bold text-[#00754A] hover:underline flex items-center gap-1"
+                    >
+                      Expand Fullscreen Map &rarr;
+                    </button>
+                  </div>
+                  <div className="flex-1 rounded-xl overflow-hidden relative border border-[#e7e5e0]">
+                    <GridMap
+                      markers={markers}
+                      selectedAssetId={selectedAssetId}
+                      onSelectAsset={(id) => selectAsset(id)}
+                    />
+                  </div>
+                </div>
+
+                {/* 1 Col: Weather Impact & Critical Alerts */}
+                <div className="space-y-4">
+                  <div className="sb-card p-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <h3 className="text-xs font-bold text-[#1E3932] uppercase tracking-wide">
+                        Severe Weather Risk (Gujarat)
+                      </h3>
+                      <CloudRain size={16} className="text-[#00754A]" />
+                    </div>
+                    <div className="space-y-2">
+                      {weather.slice(0, 2).map((w: any, idx: number) => (
+                        <div key={idx} className="bg-[#faf9f6] p-2.5 rounded-lg border border-gray-100 text-xs">
+                          <div className="flex justify-between font-bold text-gray-800">
+                            <span>{w.district}</span>
+                            <span className="text-[#c82014]">Wind: {Math.round(w.wind_speed_kmh || 45)} km/h</span>
+                          </div>
+                          <div className="text-[11px] text-gray-500 mt-0.5">
+                            Risk Level: <b className="text-gray-700">{w.risk_level}</b> &bull; Heat: {Math.round(w.temperature_c || 38)}°C
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="sb-card p-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <h3 className="text-xs font-bold text-[#1E3932] uppercase tracking-wide">
+                        Immediate Action Queue
+                      </h3>
+                      <span className="text-[10px] bg-[#cba258] text-white font-bold px-1.5 py-0.5 rounded-full">
+                        {recommendations.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2 max-h-[160px] overflow-y-auto">
+                      {recommendations.slice(0, 3).map((rec: any, idx: number) => (
+                        <div key={idx} className="p-2 bg-[#faf9f6] rounded-lg border border-gray-100 text-xs">
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold text-[#1E3932]">{rec.asset_id}</span>
+                            <span className="text-[9px] font-bold text-[#c82014]">P{rec.priority}</span>
+                          </div>
+                          <div className="text-[11px] text-gray-600 line-clamp-1">{rec.description}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* THIRD ROW: TOP RISK TABLE + TELEMETRY CHART + DISPATCH */}
+              <div className="grid grid-cols-3 gap-4 pb-8">
+                {/* 1. TOP RISK EQUIPMENT TABLE */}
+                <div className="sb-card p-4 flex flex-col">
+                  <div className="flex justify-between items-center mb-3">
+                    <div>
+                      <h2 className="text-sm font-bold tracking-tight text-[#1E3932]">Top Risk Equipment</h2>
+                      <p className="text-[10px] text-gray-500">Click any row to focus on map &amp; inspect</p>
+                    </div>
+                    <span className="text-[10px] font-bold text-[#00754A] bg-[#d4e9e2] px-2 py-0.5 rounded-full">
+                      Ranked by Risk
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1">
-                    {[
-                      { id: "ALL", label: "ALL (836)" },
-                      { id: "CRITICAL", label: "CRITICAL" },
-                      { id: "POWER_PLANT", label: "POWER PLANTS (12)" },
-                      { id: "SUBSTATION", label: "SUBSTATIONS" },
-                      { id: "TRANSFORMER", label: "TRANSFORMERS" },
-                    ].map((ft) => (
-                      <button
-                        key={ft.id}
-                        onClick={() => setFilterType(ft.id)}
-                        className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider transition-colors ${
-                          filterType === ft.id
-                            ? "bg-[#1c69d4] text-white"
-                            : "bg-[#111] text-[#888] border border-[#333] hover:text-white"
+                  <div className="overflow-y-auto max-h-[280px]">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-white border-b border-gray-200 text-gray-500 uppercase text-[9px] font-bold">
+                        <tr>
+                          <th className="pb-2 text-left">Priority</th>
+                          <th className="pb-2 text-left">Asset ID</th>
+                          <th className="pb-2 text-center">Risk</th>
+                          <th className="pb-2 text-center">Health</th>
+                          <th className="pb-2 text-right">Consumers</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {topAssets.map((asset: any, idx: number) => {
+                          const riskScore = Math.round(asset.overall_risk_score || 50);
+                          const priorityLabel =
+                            riskScore >= 75 ? "P1" : riskScore >= 50 ? "P2" : riskScore >= 25 ? "P3" : "P4";
+                          const priorityColor =
+                            riskScore >= 75
+                              ? "bg-[#c82014] text-white"
+                              : riskScore >= 50
+                              ? "bg-[#e67e22] text-white"
+                              : "bg-[#cba258] text-white";
+
+                          return (
+                            <tr
+                              key={idx}
+                              onClick={() => selectAsset(asset.asset_id)}
+                              className={`cursor-pointer transition-colors ${
+                                selectedAssetId === asset.asset_id
+                                  ? "bg-[#d4e9e2]/50 font-bold border-l-3 border-[#00754A]"
+                                  : "hover:bg-[#faf9f6]"
+                              }`}
+                            >
+                              <td className="py-2.5">
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${priorityColor}`}>
+                                  {priorityLabel}
+                                </span>
+                              </td>
+                              <td className="py-2.5 font-bold text-[#1E3932]">{asset.asset_id}</td>
+                              <td className="py-2.5 text-center font-bold text-[#c82014]">{riskScore}%</td>
+                              <td className="py-2.5 text-center font-semibold text-gray-700">
+                                {Math.round(asset.health_score || 50)}
+                              </td>
+                              <td className="py-2.5 text-right text-gray-600 font-mono">
+                                {(asset.customers_served || 0).toLocaleString()}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* 2. TELEMETRY TREND CHART + LIVE PREDICTION */}
+                <div className="sb-card p-4 flex flex-col justify-between">
+                  <div>
+                    <div className="flex justify-between items-center mb-2">
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-sm font-bold text-[#1E3932]">Sensor Telemetry Trend</h2>
+                        <span className="bg-[#1E3932] text-white px-2 py-0.5 text-[9px] font-bold rounded-full">
+                          {selectedAssetId}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 text-[9px] text-[#00754A] font-bold">
+                        <Cpu size={11} /> XGBoost Active
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 text-[9px] font-bold mb-2">
+                      <span className="flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-[#c82014]" /> Stress / Risk %
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-[#00754A]" /> Winding Temp (°C)
+                      </span>
+                    </div>
+
+                    <div className="h-[120px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={chartData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
+                          <XAxis dataKey="time" stroke="#888" fontSize={9} tickLine={false} axisLine={false} />
+                          <YAxis stroke="#888" fontSize={9} tickLine={false} axisLine={false} domain={[0, 110]} />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "#ffffff",
+                              border: "1px solid #e7e5e0",
+                              borderRadius: "8px",
+                              fontSize: "10px",
+                              boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+                            }}
+                          />
+                          <Line type="monotone" dataKey="risk" stroke="#c82014" strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="temp" stroke="#00754A" strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Real-time ML Prediction Card */}
+                  <div className="mt-3 p-3 bg-[#faf9f6] rounded-xl border border-gray-200">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-[10px] font-bold text-gray-500 uppercase">Live AI Fault Diagnosis</span>
+                      <span className="text-[9px] font-bold text-[#00754A]">
+                        Window: {livePrediction?.risk_window || "24h"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-[#1E3932]">
+                        {livePrediction?.predicted_fault_mode || "Evaluating Sensors..."}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          (livePrediction?.failure_probability || 0) > 0.5
+                            ? "bg-[#c82014] text-white"
+                            : "bg-[#cba258] text-white"
                         }`}
                       >
-                        {ft.label}
-                      </button>
-                    ))}
-                  </div>
-
-                </div>
-
-                <div className="flex-1 relative overflow-hidden border border-[#3c3c3c]" style={{ height: "100%" }}>
-                  <GridMap
-                    markers={filteredMarkers}
-                    selectedAssetId={selectedAssetId}
-                    onSelectAsset={selectAsset}
-                  />
-                  <div className="absolute bottom-2 left-2 flex gap-3 text-[9px] uppercase tracking-widest font-bold bg-[#1a1a1a]/90 p-1.5 border border-[#3c3c3c] z-10 pointer-events-none">
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#0fa336] inline-block" /> Low</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#f4b400] inline-block" /> Medium</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#e22718] inline-block" /> Critical (Pulsing)</span>
-                    <span className="flex items-center gap-1 text-[#888]">◆ Substation / ● Transformer</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* RIGHT COLUMN */}
-              <div className="space-y-4 flex flex-col" style={{ height: 390 }}>
-                <div className="bg-[#1a1a1a] border border-[#3c3c3c] p-4 flex-1 overflow-hidden flex flex-col">
-                  <div className="flex justify-between items-center mb-3">
-                    <h2 className="text-sm font-bold uppercase">Critical Outage Alerts</h2>
-                    <span className="text-[9px] font-bold text-[#bbbbbb] uppercase tracking-widest">{alerts.length} Active</span>
-                  </div>
-                  <div className="space-y-2.5 overflow-y-auto flex-1 pr-1">
-                    {alerts.map((a: any, i: number) => (
-                      <div
-                        key={i}
-                        onClick={() => selectAsset(a.asset_id)}
-                        className="cursor-pointer hover:bg-[#222] transition-colors"
-                      >
-                        <AlertItem
-                          icon={a.severity === "CRITICAL" ? <AlertTriangle size={12} /> : <BatteryWarning size={12} />}
-                          type={a.severity?.toLowerCase() || "warning"}
-                          title={`${a.asset_id} ${a.fault_type}`}
-                          desc={`${a.customers_affected?.toLocaleString()} customers affected`}
-                          time={new Date(a.started_at).toLocaleDateString()}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-[#1a1a1a] border border-[#3c3c3c] p-4">
-                  <div className="flex justify-between items-start mb-0.5">
-                    <h2 className="text-sm font-bold uppercase">Weather Risk</h2>
-                    <span className="text-[9px] font-bold text-[#bbbbbb]">IMD Station</span>
-                  </div>
-                  <p className="text-[9px] text-[#bbbbbb] mb-2">{currentWeather?.district || "Ahmedabad"} Region</p>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <CloudRain size={28} className="text-[#1c69d4]" />
-                      <div>
-                        <div className="font-bold uppercase text-sm">{currentWeather?.weather_risk_level === "HIGH" ? "Severe Weather" : "Normal Weather"}</div>
-                        <div className="text-[10px] text-[#bbbbbb]">{currentWeather?.weather_risk_level === "HIGH" ? "High impact on grid assets" : "Low impact expected"}</div>
-                      </div>
+                        {livePrediction?.failure_probability
+                          ? `${Math.round(livePrediction.failure_probability * 100)}% Failure Risk`
+                          : "Evaluating"}
+                      </span>
                     </div>
-                    <div className={`${currentWeather?.weather_risk_level === "HIGH" ? "bg-[#e22718]" : "bg-[#0fa336]"} text-white px-2 py-0.5 font-bold tracking-widest uppercase text-[10px]`}>
-                      {currentWeather?.weather_risk_level || "LOW"}
+                    <div className="text-[10px] text-gray-600 line-clamp-1">
+                      {livePrediction?.recommended_action || "Standard monitoring schedule active."}
+                    </div>
+                    <button
+                      onClick={() => setActiveTab("predictions")}
+                      className="mt-2 w-full sb-pill-btn sb-btn-outline !py-1 text-[10px]"
+                    >
+                      Open in AI Prediction Studio &rarr;
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. AUTOMATED DISPATCH ACTIONS */}
+                <div className="sb-card p-4 flex flex-col justify-between">
+                  <div>
+                    <div className="flex justify-between items-center mb-3">
+                      <h2 className="text-sm font-bold text-[#1E3932]">Automated Dispatch Queue</h2>
+                      <span className="text-[10px] font-bold text-gray-500">{recommendations.length} Pending</span>
+                    </div>
+
+                    <div className="space-y-2.5 max-h-[260px] overflow-y-auto">
+                      {recommendations.map((rec: any, idx: number) => (
+                        <div
+                          key={idx}
+                          className="p-2.5 bg-[#faf9f6] rounded-xl border border-gray-100 flex items-center justify-between"
+                        >
+                          <div className="min-w-0 pr-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-xs text-[#1E3932]">{rec.asset_id}</span>
+                              <span className="text-[9px] font-bold bg-[#cba258] text-white px-1.5 py-0.2 rounded-full">
+                                P{rec.priority}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-gray-600 truncate">{rec.description}</div>
+                          </div>
+                          <button
+                            onClick={() =>
+                              openDispatchForAlert({
+                                asset_id: rec.asset_id,
+                                fault_type: rec.description,
+                                severity: rec.priority === 1 ? "CRITICAL" : "HIGH",
+                              })
+                            }
+                            className="sb-pill-btn sb-btn-primary !py-1 !px-2.5 text-[10px] flex-shrink-0"
+                          >
+                            Dispatch
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-center border-t border-[#3c3c3c] pt-3">
-                    <div><div className="font-bold text-sm">{currentWeather?.rainfall || 0}mm</div><div className="text-[9px] text-[#7e7e7e] uppercase">Rainfall</div></div>
-                    <div><div className="font-bold text-sm">{currentWeather?.wind_speed || 0} km/h</div><div className="text-[9px] text-[#7e7e7e] uppercase">Wind</div></div>
-                    <div><div className="font-bold text-sm">{currentWeather?.avg_temp ? Math.round(currentWeather.avg_temp) : 28}°C</div><div className="text-[9px] text-[#7e7e7e] uppercase">Temp</div></div>
-                  </div>
+
+                  <button
+                    onClick={() => setActiveTab("crews")}
+                    className="mt-3 w-full sb-pill-btn sb-btn-dark !py-1.5 text-xs"
+                  >
+                    View All Field Crew Positions &rarr;
+                  </button>
                 </div>
               </div>
             </div>
+          )}
 
-            {/* BOTTOM ROW */}
-            <div className="grid grid-cols-3 gap-4 pb-6">
-              {/* TOP RISK TABLE */}
-              <div className="bg-[#1a1a1a] border border-[#3c3c3c] p-4">
-                <div className="flex justify-between items-center mb-3">
-                  <h2 className="text-sm font-bold uppercase">Top Risk Equipment</h2>
-                  <span className="text-[9px] text-[#888] uppercase">Click row to focus</span>
+          {/* VIEW 2: FULL INTERACTIVE RISK MAP */}
+          {activeTab === "map" && (
+            <div className="flex flex-col h-[calc(100vh-100px)] space-y-3">
+              <div className="flex justify-between items-center bg-white p-3 rounded-xl border border-[#e7e5e0] shadow-xs">
+                <div>
+                  <h1 className="text-sm font-bold text-[#1E3932]">
+                    Gujarat Power Grid &bull; Interactive Geospatial SCADA
+                  </h1>
+                  <p className="text-[10px] text-gray-500">
+                    Displaying {filteredMarkers.length} of {markers.length} total monitored electrical facilities
+                  </p>
                 </div>
-                <div className="overflow-x-auto max-h-[260px]">
-                  <table className="w-full">
-                    <thead className="sticky top-0 bg-[#1a1a1a] z-10">
-                      <tr className="text-left text-[#7e7e7e] text-[9px] uppercase tracking-widest border-b border-[#3c3c3c]">
-                        <th className="pb-2 font-normal">#</th>
-                        <th className="pb-2 font-normal">Asset ID</th>
-                        <th className="pb-2 font-normal text-center">Risk</th>
-                        <th className="pb-2 font-normal text-center">Health</th>
-                        <th className="pb-2 font-normal text-right">Customers</th>
+                <div className="flex gap-1.5">
+                  {[
+                    { id: "ALL", label: "All (836)" },
+                    { id: "CRITICAL", label: "Critical" },
+                    { id: "POWER_PLANT", label: "Power Plants (12)" },
+                    { id: "SUBSTATION", label: "Substations" },
+                    { id: "TRANSFORMER", label: "Transformers (TR)" },
+                  ].map((ft) => (
+                    <button
+                      key={ft.id}
+                      onClick={() => setFilterType(ft.id)}
+                      className={`sb-pill-btn !py-1 !px-3 text-xs ${
+                        filterType === ft.id ? "sb-btn-primary" : "sb-btn-outline"
+                      }`}
+                    >
+                      {ft.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex-1 rounded-xl overflow-hidden relative border border-[#e7e5e0] shadow-md">
+                <GridMap
+                  markers={filteredMarkers}
+                  selectedAssetId={selectedAssetId}
+                  onSelectAsset={(id) => selectAsset(id)}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* VIEW 3: AI PREDICTOR & TESTING BENCH (FOR JUDGES) */}
+          {activeTab === "predictions" && (
+            <div className="space-y-4 max-w-6xl mx-auto pb-10">
+              <div className="bg-white p-4 rounded-xl border border-[#e7e5e0] shadow-xs flex justify-between items-center">
+                <div>
+                  <h1 className="text-base font-bold text-[#1E3932] flex items-center gap-2">
+                    <Cpu className="text-[#00754A]" size={20} />
+                    AI Failure Prediction Studio &bull; XGBoost Model Evaluator
+                  </h1>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Real-time inference supporting full 0–100% failure scaling with equipment-specific domain rules.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 bg-[#faf9f6] p-2 rounded-xl border border-gray-200 text-xs">
+                  <div>
+                    <span className="text-gray-500">Accuracy:</span>{" "}
+                    <b className="text-[#00754A]">96.3%</b>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">RMSE:</span>{" "}
+                    <b className="text-[#1E3932]">0.0797</b>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Trees:</span> <b>100</b>
+                  </div>
+                </div>
+              </div>
+
+              {/* DEMO SCENARIOS FOR JUDGES */}
+              <div className="sb-card p-4">
+                <div className="text-xs font-bold text-[#1E3932] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Sliders size={14} className="text-[#00754A]" /> Instant Demo Scenarios for Judges (Click to Evaluate)
+                </div>
+                <div className="grid grid-cols-5 gap-2">
+                  <button
+                    onClick={() => applyPreset("normal")}
+                    className="p-2.5 rounded-xl border border-gray-200 hover:border-[#00754A] bg-white text-left transition-all active:scale-95 group shadow-xs"
+                  >
+                    <div className="font-bold text-xs text-[#00754A] flex items-center justify-between">
+                      1. Safe Operation <ChevronRight size={12} />
+                    </div>
+                    <div className="text-[10px] text-gray-500 mt-1">Normal 48°C &bull; Low gas &bull; 97 Health</div>
+                  </button>
+
+                  <button
+                    onClick={() => applyPreset("arcing")}
+                    className="p-2.5 rounded-xl border border-red-200 hover:border-[#c82014] bg-white text-left transition-all active:scale-95 group shadow-xs"
+                  >
+                    <div className="font-bold text-xs text-[#c82014] flex items-center justify-between">
+                      2. Arcing Breakdown <ChevronRight size={12} />
+                    </div>
+                    <div className="text-[10px] text-gray-500 mt-1">42 ppm C2H2 &bull; Partial Discharge &bull; 94% Risk</div>
+                  </button>
+
+                  <button
+                    onClick={() => applyPreset("thermal")}
+                    className="p-2.5 rounded-xl border border-amber-200 hover:border-[#e67e22] bg-white text-left transition-all active:scale-95 group shadow-xs"
+                  >
+                    <div className="font-bold text-xs text-[#e67e22] flex items-center justify-between">
+                      3. Thermal Overheating <ChevronRight size={12} />
+                    </div>
+                    <div className="text-[10px] text-gray-500 mt-1">102°C Temp &bull; 124% Load &bull; 91% Risk</div>
+                  </button>
+
+                  <button
+                    onClick={() => applyPreset("mechanical")}
+                    className="p-2.5 rounded-xl border border-yellow-200 hover:border-[#cba258] bg-white text-left transition-all active:scale-95 group shadow-xs"
+                  >
+                    <div className="font-bold text-xs text-[#cba258] flex items-center justify-between">
+                      4. Core Looseness <ChevronRight size={12} />
+                    </div>
+                    <div className="text-[10px] text-gray-500 mt-1">7.2 mm/s Vibration &bull; Mechanical Strain</div>
+                  </button>
+
+                  <button
+                    onClick={() => applyPreset("tr_overload")}
+                    className="p-2.5 rounded-xl border border-[#00754A]/30 hover:border-[#00754A] bg-[#d4e9e2]/30 text-left transition-all active:scale-95 group shadow-xs"
+                  >
+                    <div className="font-bold text-xs text-[#006241] flex items-center justify-between">
+                      5. Distribution TR (No DGA) <ChevronRight size={12} />
+                    </div>
+                    <div className="text-[10px] text-gray-600 mt-1">Pure SCADA telemetry &bull; Gases not required</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* EQUIPMENT SELECTOR & SLIDERS */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2 sb-card p-5 space-y-4">
+                  <div className="flex justify-between items-center border-b border-gray-200 pb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-[#1E3932]">Adjust Telemetry Parameters</h3>
+                      <p className="text-xs text-gray-500">Simulate any combination of operational stresses</p>
+                    </div>
+
+                    {/* TR vs SS MODE SWITCHER */}
+                    <div className="flex items-center gap-2 bg-[#faf9f6] p-1.5 rounded-full border border-gray-200">
+                      <button
+                        onClick={() => setSimEquipmentType("SS")}
+                        className={`px-3 py-1 text-xs font-bold rounded-full transition-all ${
+                          simEquipmentType === "SS" ? "bg-[#00754A] text-white shadow-xs" : "text-gray-600"
+                        }`}
+                      >
+                        ⚡ Substation / PP (With DGA)
+                      </button>
+                      <button
+                        onClick={() => setSimEquipmentType("TR")}
+                        className={`px-3 py-1 text-xs font-bold rounded-full transition-all ${
+                          simEquipmentType === "TR" ? "bg-[#00754A] text-white shadow-xs" : "text-gray-600"
+                        }`}
+                      >
+                        🔌 Distribution TR (No Gases)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* DOMAIN NOTE FOR TR */}
+                  {simEquipmentType === "TR" && (
+                    <div className="p-3 bg-[#d4e9e2] border border-[#00754A]/30 rounded-xl text-xs text-[#006241] flex items-start gap-2">
+                      <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+                      <div>
+                        <b>Distribution Transformer (TR) Mode Active:</b> In Indian power distribution (GETCO/DISCOMs),
+                        pole and plinth-mounted distribution transformers do not undergo dissolved gas analysis (DGA).
+                        Health and failure predictions are calculated strictly from thermal, vibration, and electrical SCADA sensors.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SLIDERS */}
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <div className="flex justify-between mb-1 font-semibold">
+                        <span>Winding Temperature</span>
+                        <span className="font-bold text-[#1E3932]">{simTemp}°C</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="30"
+                        max="115"
+                        value={simTemp}
+                        onChange={(e) => setSimTemp(Number(e.target.value))}
+                        className="w-full accent-[#00754A]"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between mb-1 font-semibold">
+                        <span>Oil Temperature</span>
+                        <span className="font-bold text-[#1E3932]">{simOilTemp}°C</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="25"
+                        max="110"
+                        value={simOilTemp}
+                        onChange={(e) => setSimOilTemp(Number(e.target.value))}
+                        className="w-full accent-[#00754A]"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between mb-1 font-semibold">
+                        <span>Vibration Velocity</span>
+                        <span className="font-bold text-[#1E3932]">{simVibration} mm/s</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="8.0"
+                        step="0.1"
+                        value={simVibration}
+                        onChange={(e) => setSimVibration(Number(e.target.value))}
+                        className="w-full accent-[#00754A]"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between mb-1 font-semibold">
+                        <span>Operational Load</span>
+                        <span className="font-bold text-[#1E3932]">{simLoad}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="30"
+                        max="135"
+                        value={simLoad}
+                        onChange={(e) => setSimLoad(Number(e.target.value))}
+                        className="w-full accent-[#00754A]"
+                      />
+                    </div>
+
+                    {/* DGA GAS SLIDERS (HIDDEN WHEN TR IS SELECTED) */}
+                    {simEquipmentType === "SS" ? (
+                      <>
+                        <div>
+                          <div className="flex justify-between mb-1 font-semibold">
+                            <span>Acetylene (C2H2) - Arcing Gas</span>
+                            <span className={`font-bold ${simAcetylene > 15 ? "text-[#c82014]" : "text-[#1E3932]"}`}>
+                              {simAcetylene} ppm
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="50"
+                            step="0.5"
+                            value={simAcetylene}
+                            onChange={(e) => setSimAcetylene(Number(e.target.value))}
+                            className="w-full accent-[#c82014]"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between mb-1 font-semibold">
+                            <span>Ethylene (C2H4) - Thermal Gas</span>
+                            <span className={`font-bold ${simEthylene > 80 ? "text-[#e67e22]" : "text-[#1E3932]"}`}>
+                              {simEthylene} ppm
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="180"
+                            value={simEthylene}
+                            onChange={(e) => setSimEthylene(Number(e.target.value))}
+                            className="w-full accent-[#e67e22]"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between mb-1 font-semibold">
+                            <span>Hydrogen (H2) - Partial Discharge</span>
+                            <span className="font-bold text-[#1E3932]">{simHydrogen} ppm</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="250"
+                            value={simHydrogen}
+                            onChange={(e) => setSimHydrogen(Number(e.target.value))}
+                            className="w-full accent-[#00754A]"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between mb-1 font-semibold">
+                            <span>Methane (CH4) - Decomposition</span>
+                            <span className="font-bold text-[#1E3932]">{simMethane} ppm</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="200"
+                            value={simMethane}
+                            onChange={(e) => setSimMethane(Number(e.target.value))}
+                            className="w-full accent-[#00754A]"
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="col-span-2 p-3 bg-gray-50 rounded-xl text-center text-gray-500 text-xs border border-gray-200">
+                        ⚡ DGA Gas Analysis disabled for standard Distribution Transformers (TR).
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      onClick={() => handleSimulate()}
+                      disabled={simulating}
+                      className="w-full sb-pill-btn sb-btn-primary !py-3 text-sm font-bold shadow-md"
+                    >
+                      <Play size={16} fill="currentColor" />
+                      {simulating ? "Evaluating XGBoost Decision Trees..." : "Run Live XGBoost AI Inference"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* INFERENCE RESULT CARD */}
+                <div className="sb-card p-5 flex flex-col justify-between">
+                  <div>
+                    <div className="flex justify-between items-center border-b border-gray-200 pb-3 mb-3">
+                      <h3 className="text-sm font-bold text-[#1E3932]">Prediction Output</h3>
+                      <span className="text-[10px] bg-[#d4e9e2] text-[#006241] font-bold px-2 py-0.5 rounded-full">
+                        XGBoost v1.0
+                      </span>
+                    </div>
+
+                    {simResult ? (
+                      <div className="space-y-3">
+                        <div>
+                          <div className="text-[10px] uppercase font-bold text-gray-500">Predicted Fault Mode</div>
+                          <div className="text-base font-extrabold text-[#1E3932] mt-0.5">
+                            {simResult.predicted_fault_mode}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 bg-[#faf9f6] p-3 rounded-xl border border-gray-200">
+                          <div>
+                            <div className="text-[9px] uppercase font-bold text-gray-500">Failure Probability</div>
+                            <div
+                              className={`text-2xl font-extrabold ${
+                                simResult.failure_probability > 0.6
+                                  ? "text-[#c82014]"
+                                  : simResult.failure_probability > 0.3
+                                  ? "text-[#e67e22]"
+                                  : "text-[#00754A]"
+                              }`}
+                            >
+                              {Math.round(simResult.failure_probability * 100)}%
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[9px] uppercase font-bold text-gray-500">Health Index</div>
+                            <div className="text-2xl font-extrabold text-[#1E3932]">
+                              {Math.round(simResult.health_score)}/100
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[10px] uppercase font-bold text-gray-500 mb-1">Time Horizon Window</div>
+                          <span className="inline-block bg-[#1E3932] text-white px-3 py-1 rounded-full text-xs font-bold">
+                            Within {simResult.risk_window}
+                          </span>
+                        </div>
+
+                        <div>
+                          <div className="text-[10px] uppercase font-bold text-gray-500 mb-1">Top Driving Factors</div>
+                          <div className="space-y-1">
+                            {simResult.top_drivers?.map((d: any, i: number) => (
+                              <div
+                                key={i}
+                                className="flex justify-between text-xs bg-[#faf9f6] px-2.5 py-1 rounded-md border border-gray-100"
+                              >
+                                <span className="text-gray-700 capitalize">{d.feature.replace(/_/g, " ")}: {d.value}</span>
+                                <span className="font-bold text-[#00754A]">{(d.weight * 100).toFixed(0)}% weight</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-16 text-gray-400">
+                        <Cpu size={36} className="mx-auto mb-2 opacity-40 text-[#00754A]" />
+                        <div className="text-xs">Adjust sliders or click a scenario above to run live prediction.</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {simResult && (
+                    <div className="mt-3 p-3 bg-[#d4e9e2]/50 border-l-3 border-[#00754A] rounded-r-xl text-xs text-[#1E3932]">
+                      <div className="font-bold uppercase text-[10px] mb-0.5 text-[#006241]">Automated Mitigation:</div>
+                      {simResult.recommended_action}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW 4: MAINTENANCE & WORK ORDERS */}
+          {activeTab === "maintenance" && (
+            <div className="space-y-4 pb-10">
+              <div className="bg-white p-4 rounded-xl border border-[#e7e5e0] shadow-xs flex justify-between items-center">
+                <div>
+                  <h1 className="text-base font-bold text-[#1E3932] flex items-center gap-2">
+                    <Wrench className="text-[#00754A]" size={20} />
+                    Grid Maintenance &amp; Work Order Management
+                  </h1>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Schedule, track, and dispatch preventative maintenance across all GETCO sub-stations and distribution transformers.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowCreateWO(true)}
+                    className="sb-pill-btn sb-btn-primary !py-1.5 text-xs shadow-xs"
+                  >
+                    <Plus size={14} /> Create Work Order
+                  </button>
+                </div>
+              </div>
+
+              {/* MAINTENANCE METRICS */}
+              <div className="grid grid-cols-4 gap-4">
+                <KpiCard
+                  icon={<Wrench className="text-[#00754A]" size={18} />}
+                  title="Active Work Orders"
+                  value={workOrders.filter((w) => w.status !== "COMPLETED").length}
+                  sub="Scheduled or in-progress"
+                />
+                <KpiCard
+                  icon={<AlertTriangle className="text-[#c82014]" size={18} />}
+                  title="P1 Critical Orders"
+                  value={workOrders.filter((w) => w.priority.startsWith("P1")).length}
+                  sub="Immediate crew assigned"
+                />
+                <KpiCard
+                  icon={<CheckCircle className="text-[#00754A]" size={18} />}
+                  title="Completed This Month"
+                  value={18}
+                  sub="Routine inspections logged"
+                />
+                <KpiCard
+                  icon={<Clock className="text-[#cba258]" size={18} />}
+                  title="Fleet MTTR"
+                  value="1.8 hrs"
+                  sub="Mean Time To Resolution"
+                />
+              </div>
+
+              {/* WORK ORDERS TABLE */}
+              <div className="sb-card p-5">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-sm font-bold text-[#1E3932]">Work Order Ledger</h2>
+                  <div className="flex gap-1.5">
+                    {["ALL", "IN_PROGRESS", "SCHEDULED", "COMPLETED"].map((st) => (
+                      <button
+                        key={st}
+                        onClick={() => setWoFilter(st)}
+                        className={`sb-pill-btn !py-1 !px-3 text-xs ${
+                          woFilter === st ? "sb-btn-primary" : "sb-btn-outline"
+                        }`}
+                      >
+                        {st.replace(/_/g, " ")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-[#faf9f6] border-b border-gray-200 text-gray-500 uppercase text-[9px] font-bold">
+                      <tr>
+                        <th className="p-3 text-left">WO ID</th>
+                        <th className="p-3 text-left">Asset ID</th>
+                        <th className="p-3 text-left">District</th>
+                        <th className="p-3 text-left">Maintenance Scope</th>
+                        <th className="p-3 text-left">Priority</th>
+                        <th className="p-3 text-left">Assigned Fleet</th>
+                        <th className="p-3 text-left">Target Window</th>
+                        <th className="p-3 text-center">Status</th>
+                        <th className="p-3 text-center">Action</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#3c3c3c]">
-                      {topAssets.map((asset: any, index: number) => (
-                        <tr
-                          key={`${asset.asset_id}-${index}`}
-                          onClick={() => selectAsset(asset.asset_id)}
-                          className={`cursor-pointer transition-colors text-[10px] ${
-                            selectedAssetId === asset.asset_id ? "bg-[#1c69d4]/20 border-l-2 border-[#1c69d4]" : "hover:bg-[#262626]"
-                          }`}
-                        >
-                          <td className="py-2.5 px-1 text-[#888]">{index + 1}</td>
-                          <td className="py-2.5 font-bold text-white">{asset.asset_id}</td>
-                          <td className="py-2.5 text-center">
-                            <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold text-white ${Number(asset.overall_risk_score) > 75 ? "bg-[#e22718]" : "bg-[#f4b400]"}`}>
-                              {Math.round(asset.overall_risk_score)}%
+                    <tbody className="divide-y divide-gray-100">
+                      {workOrders
+                        .filter((w) => woFilter === "ALL" || w.status === woFilter)
+                        .map((wo) => (
+                          <tr key={wo.id} className="hover:bg-[#faf9f6] transition-colors">
+                            <td className="p-3 font-bold text-[#1E3932]">{wo.id}</td>
+                            <td className="p-3 font-semibold text-[#00754A]">{wo.asset_id}</td>
+                            <td className="p-3 text-gray-600">{wo.district}</td>
+                            <td className="p-3 text-gray-800 font-medium">{wo.type}</td>
+                            <td className="p-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                  wo.priority.startsWith("P1")
+                                    ? "bg-[#c82014] text-white"
+                                    : wo.priority.startsWith("P2")
+                                    ? "bg-[#e67e22] text-white"
+                                    : "bg-[#cba258] text-white"
+                                }`}
+                              >
+                                {wo.priority}
+                              </span>
+                            </td>
+                            <td className="p-3 text-gray-600 font-medium">{wo.assigned_crew}</td>
+                            <td className="p-3 text-gray-500">{wo.scheduled_date}</td>
+                            <td className="p-3 text-center">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                  wo.status === "COMPLETED"
+                                    ? "bg-[#d4e9e2] text-[#006241]"
+                                    : wo.status === "IN_PROGRESS"
+                                    ? "bg-[#cba258] text-white"
+                                    : "bg-gray-100 text-gray-700"
+                                }`}
+                              >
+                                {wo.status.replace(/_/g, " ")}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center">
+                              {wo.status !== "COMPLETED" ? (
+                                <button
+                                  onClick={() => handleCompleteWO(wo.id)}
+                                  className="sb-pill-btn sb-btn-outline !py-1 !px-2.5 text-[10px]"
+                                >
+                                  Complete
+                                </button>
+                              ) : (
+                                <span className="text-gray-400 text-[10px] font-bold">Closed</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW 5: SCADA SENSOR TELEMETRY STREAM (HIGH UTILITY) */}
+          {activeTab === "sensors" && (
+            <div className="space-y-4 pb-10">
+              <div className="bg-white p-4 rounded-xl border border-[#e7e5e0] shadow-xs flex justify-between items-center">
+                <div>
+                  <h1 className="text-base font-bold text-[#1E3932] flex items-center gap-2">
+                    <Activity className="text-[#00754A]" size={20} />
+                    Live SCADA Sensor Telemetry & Diagnostics Center
+                  </h1>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Real-time monitoring across 31,271 synchronized thermal, vibration, acoustic, and electrical transducers.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-[#d4e9e2] text-[#006241] font-bold px-3 py-1 rounded-full flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#00754A] animate-ping" />
+                    Live Telemetry Polling Active
+                  </span>
+                </div>
+              </div>
+
+              {/* SENSOR HEALTH SUMMARY */}
+              <div className="grid grid-cols-4 gap-4">
+                <KpiCard
+                  icon={<Activity className="text-[#00754A]" size={18} />}
+                  title="Total Transducers"
+                  value="31,271"
+                  sub="Calibrated to IEEE / IEC Standards"
+                />
+                <KpiCard
+                  icon={<CheckCircle className="text-[#00754A]" size={18} />}
+                  title="Normal Parameter Range"
+                  value="30,845"
+                  sub="98.6% Operational Health"
+                />
+                <KpiCard
+                  icon={<AlertTriangle className="text-[#e67e22]" size={18} />}
+                  title="Warning Threshold"
+                  value="384"
+                  sub="Thermal & load anomalies"
+                />
+                <KpiCard
+                  icon={<AlertCircle className="text-[#c82014]" size={18} />}
+                  title="Critical Transducers"
+                  value="42"
+                  sub="Exceeded safety limits"
+                />
+              </div>
+
+              {/* LIVE STREAM TABLE */}
+              <div className="sb-card p-5">
+                <div className="flex justify-between items-center mb-3">
+                  <h2 className="text-sm font-bold text-[#1E3932]">Live Transducer Data Feed</h2>
+                  <span className="text-xs text-gray-500">Updated every 15s</span>
+                </div>
+
+                <div className="overflow-x-auto max-h-[420px]">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-[#faf9f6] border-b border-gray-200 text-gray-500 uppercase text-[9px] font-bold">
+                      <tr>
+                        <th className="p-3 text-left">Asset ID</th>
+                        <th className="p-3 text-left">Equipment Type</th>
+                        <th className="p-3 text-left">District</th>
+                        <th className="p-3 text-right">Winding Temp</th>
+                        <th className="p-3 text-right">Oil Temp</th>
+                        <th className="p-3 text-right">Vibration (mm/s)</th>
+                        <th className="p-3 text-right">Load %</th>
+                        <th className="p-3 text-right">Voltage</th>
+                        <th className="p-3 text-center">Status</th>
+                        <th className="p-3 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {(sensorStream.length > 0
+                        ? sensorStream
+                        : [
+                            {
+                              id: 1,
+                              asset_id: "SS-2216",
+                              asset_type: "substation",
+                              district: "Ahmedabad",
+                              temperature: 88.4,
+                              oil_temperature: 82.1,
+                              vibration: 3.4,
+                              load_percent: 94.2,
+                              voltage: 220.0,
+                              status: "CRITICAL",
+                            },
+                            {
+                              id: 2,
+                              asset_id: "PP-4001",
+                              asset_type: "power_plant",
+                              district: "Kutch",
+                              temperature: 78.2,
+                              oil_temperature: 71.5,
+                              vibration: 2.8,
+                              load_percent: 88.0,
+                              voltage: 400.0,
+                              status: "WARNING",
+                            },
+                            {
+                              id: 3,
+                              asset_id: "TR-1044",
+                              asset_type: "transformer",
+                              district: "Surat",
+                              temperature: 62.0,
+                              oil_temperature: 56.4,
+                              vibration: 6.8,
+                              load_percent: 74.0,
+                              voltage: 33.0,
+                              status: "CRITICAL",
+                            },
+                            {
+                              id: 4,
+                              asset_id: "SS-1180",
+                              asset_type: "substation",
+                              district: "Rajkot",
+                              temperature: 52.1,
+                              oil_temperature: 47.0,
+                              vibration: 1.4,
+                              load_percent: 62.5,
+                              voltage: 66.0,
+                              status: "NORMAL",
+                            },
+                            {
+                              id: 5,
+                              asset_id: "TR-0892",
+                              asset_type: "transformer",
+                              district: "Vadodara",
+                              temperature: 49.0,
+                              oil_temperature: 44.2,
+                              vibration: 1.2,
+                              load_percent: 54.0,
+                              voltage: 11.0,
+                              status: "NORMAL",
+                            },
+                          ]
+                      ).map((s) => (
+                        <tr key={s.id} className="hover:bg-[#faf9f6] transition-colors">
+                          <td className="p-3 font-bold text-[#1E3932]">{s.asset_id}</td>
+                          <td className="p-3 capitalize text-gray-600">{s.asset_type?.replace(/_/g, " ")}</td>
+                          <td className="p-3 text-gray-700">{s.district}</td>
+                          <td className={`p-3 text-right font-mono font-bold ${s.temperature > 80 ? "text-[#c82014]" : "text-gray-800"}`}>
+                            {s.temperature}°C
+                          </td>
+                          <td className="p-3 text-right font-mono text-gray-600">{s.oil_temperature}°C</td>
+                          <td className={`p-3 text-right font-mono font-bold ${s.vibration > 4.5 ? "text-[#c82014]" : "text-gray-800"}`}>
+                            {s.vibration} mm/s
+                          </td>
+                          <td className="p-3 text-right font-mono text-gray-800">{s.load_percent}%</td>
+                          <td className="p-3 text-right font-mono text-gray-600">{s.voltage} kV</td>
+                          <td className="p-3 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                s.status === "CRITICAL"
+                                  ? "bg-[#c82014] text-white"
+                                  : s.status === "WARNING"
+                                  ? "bg-[#e67e22] text-white"
+                                  : "bg-[#d4e9e2] text-[#006241]"
+                              }`}
+                            >
+                              {s.status}
                             </span>
                           </td>
-                          <td className="py-2.5 text-center font-bold text-[#bbb]">{Math.round(asset.health_score || 50)}</td>
-                          <td className="py-2.5 text-right font-mono text-[#bbb]">{(asset.customers_served || 0).toLocaleString()}</td>
+                          <td className="p-3 text-center">
+                            <button
+                              onClick={() => handleFocusOnMap(s.asset_id)}
+                              className="sb-pill-btn sb-btn-outline !py-0.5 !px-2 text-[10px]"
+                            >
+                              Inspect
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               </div>
-
-              {/* TELEMETRY CHART + LIVE XGBOOST INFERENCE */}
-              <div className="bg-[#1a1a1a] border border-[#3c3c3c] p-4 flex flex-col">
-                <div className="flex justify-between items-center mb-2">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-bold uppercase">Asset Telemetry Trend</h2>
-                    <span className="bg-[#1c69d4] text-white px-1.5 py-0.5 text-[9px] font-bold">
-                      {selectedAssetId}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 text-[9px] text-[#0fa336] font-bold uppercase">
-                    <Cpu size={11} /> XGBoost Active
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4 text-[9px] font-bold uppercase tracking-widest mb-2">
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#e22718] inline-block" /> Stress/Risk</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#1c69d4] inline-block" /> Temperature (°C)</span>
-                </div>
-
-                <div className="h-[120px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
-                      <XAxis dataKey="time" stroke="#7e7e7e" fontSize={9} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#7e7e7e" fontSize={9} tickLine={false} axisLine={false} domain={[0, 110]} />
-                      <Tooltip contentStyle={{ backgroundColor: "#111", border: "1px solid #3c3c3c", borderRadius: 0, fontSize: 10 }} />
-                      <Line type="monotone" dataKey="risk" stroke="#e22718" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="temp" stroke="#1c69d4" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-
-                {/* Real-time ML Prediction Card */}
-                <div className="mt-3 pt-3 border-t border-[#3c3c3c] bg-[#111] p-2.5">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-[9px] font-bold uppercase text-[#888]">Live AI Failure Prediction</span>
-                    <span className="text-[9px] font-bold text-[#1c69d4] uppercase">Window: {livePrediction?.risk_window || "24h"}</span>
-                  </div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-bold uppercase text-white">
-                      {livePrediction?.predicted_fault_mode || "Evaluating Sensors..."}
-                    </span>
-                    <span className={`text-[10px] font-extrabold px-1.5 py-0.5 uppercase ${
-                      livePrediction?.failure_probability > 0.5 ? "bg-[#e22718] text-white" : "bg-[#f4b400] text-black"
-                    }`}>
-                      {livePrediction?.failure_probability ? `${Math.round(livePrediction.failure_probability * 100)}% Prob` : "Active"}
-                    </span>
-                  </div>
-                  <div className="text-[9px] text-[#888] line-clamp-1 mb-1">
-                    {livePrediction?.recommended_action || "Advisory: Continuous monitoring schedule active."}
-                  </div>
-                  {livePrediction?.top_drivers && (
-                    <div className="flex gap-2 text-[8px] text-[#666] uppercase">
-                      {livePrediction.top_drivers.slice(0, 3).map((d: any, idx: number) => (
-                        <span key={idx} className="bg-[#181818] border border-[#2a2a2a] px-1 py-0.5">
-                          {d.feature.replace(/_/g, " ")}: {d.value}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* RECOMMENDED ACTIONS */}
-              <div className="bg-[#1a1a1a] border border-[#3c3c3c] p-4 flex flex-col">
-                <div className="flex justify-between items-center mb-3">
-                  <h2 className="text-sm font-bold uppercase">Automated Dispatch Actions</h2>
-                  <span className="text-[9px] font-bold text-[#bbbbbb] uppercase tracking-widest">{recommendations.length} Queue</span>
-                </div>
-                <div className="space-y-3 overflow-y-auto max-h-[260px] pr-1">
-                  {recommendations.map((rec: any, idx: number) => (
-                    <ActionItem
-                      key={idx}
-                      icon={rec.priority === 1 ? <AlertTriangle size={14} /> : <Wrench size={14} />}
-                      type={rec.priority === 1 ? "critical" : "warning"}
-                      title={`${rec.asset_id}: ${rec.action_type.replace(/_/g, " ")}`}
-                      desc={rec.description}
-                      priority={`Priority ${rec.priority}`}
-                      btn={rec.priority === 1 ? "Dispatch Crew" : "Schedule WO"}
-                      btnOutline={rec.priority !== 1}
-                    />
-                  ))}
-                </div>
-              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* VIEW 2: FULL SCREEN RISK MAP */}
-        {activeTab === "map" && (
-          <div className="flex-1 flex flex-col h-full p-4">
-            <div className="flex justify-between items-center mb-3">
-              <div>
-                <h1 className="text-lg font-bold uppercase">Gujarat Power Grid &bull; Interactive Risk Map</h1>
-                <p className="text-[10px] text-[#888]">
-                  Displaying {filteredMarkers.length} of {markers.length} total monitored power grid facilities
-                </p>
+          {/* VIEW 6: CREW DISPATCH & POSITIONING */}
+          {activeTab === "crews" && (
+            <div className="space-y-4 pb-10">
+              <div className="bg-white p-4 rounded-xl border border-[#e7e5e0] shadow-xs flex justify-between items-center">
+                <div>
+                  <h1 className="text-base font-bold text-[#1E3932] flex items-center gap-2">
+                    <Truck className="text-[#00754A]" size={20} />
+                    Field Crew Positioning & Dispatch Console
+                  </h1>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    12 Specialized GETCO field teams covering 6 operational zones across Gujarat.
+                  </p>
+                </div>
+                <div className="text-xs font-bold text-[#00754A] bg-[#d4e9e2] px-3 py-1 rounded-full">
+                  {crewsList.filter((c) => c.available).length} Crews Available for Dispatch
+                </div>
               </div>
-              <div className="flex gap-2">
-                {[
-                  { id: "ALL", label: "ALL (836)" },
-                  { id: "CRITICAL", label: "CRITICAL" },
-                  { id: "POWER_PLANT", label: "POWER PLANTS (12)" },
-                  { id: "SUBSTATION", label: "SUBSTATIONS" },
-                  { id: "TRANSFORMER", label: "TRANSFORMERS" },
-                ].map((ft) => (
-                  <button
-                    key={ft.id}
-                    onClick={() => setFilterType(ft.id)}
-                    className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider ${
-                      filterType === ft.id ? "bg-[#1c69d4] text-white" : "bg-[#1a1a1a] border border-[#333] text-[#888] hover:text-white"
-                    }`}
+
+              <div className="grid grid-cols-3 gap-4">
+                {crewsList.map((crew) => (
+                  <div
+                    key={crew.id}
+                    className="sb-card p-4 flex flex-col justify-between border-t-3 border-t-[#00754A]"
                   >
-                    {ft.label}
-                  </button>
+                    <div>
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <div className="text-sm font-bold text-[#1E3932]">{crew.name}</div>
+                          <div className="text-[11px] text-gray-500">
+                            {crew.crew_id} &bull; {crew.zone}
+                          </div>
+                        </div>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                            crew.available ? "bg-[#d4e9e2] text-[#006241]" : "bg-[#c82014] text-white"
+                          }`}
+                        >
+                          {crew.available ? "Available" : "Dispatched"}
+                        </span>
+                      </div>
+
+                      <div className="text-xs text-gray-600 space-y-1 border-t border-gray-100 pt-2">
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Skill Level:</span>
+                          <b className="capitalize text-gray-800">{crew.skill_level.replace(/_/g, " ")}</b>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">GPS Coordinates:</span>
+                          <span className="font-mono text-gray-700">
+                            {crew.latitude.toFixed(3)}, {crew.longitude.toFixed(3)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => openDispatchForCrew(crew)}
+                      disabled={!crew.available}
+                      className={`mt-4 w-full sb-pill-btn text-xs !py-2 ${
+                        crew.available ? "sb-btn-primary" : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                      }`}
+                    >
+                      {crew.available ? "Dispatch to Nearest Incident" : "On Active Field Assignment"}
+                    </button>
+                  </div>
                 ))}
               </div>
-
             </div>
-            <div className="flex-1 relative border border-[#3c3c3c] overflow-hidden" style={{ minHeight: "550px" }}>
-              <GridMap
-                markers={filteredMarkers}
-                selectedAssetId={selectedAssetId}
-                onSelectAsset={(id) => {
-                  selectAsset(id);
-                }}
-              />
-              {/* Floating Asset Card */}
-              {selectedAssetId && (
-                <div className="absolute top-4 right-4 z-[1000] bg-[#111]/95 border border-[#444] p-3 w-64 shadow-2xl backdrop-blur-md">
-                  <div className="text-[9px] text-[#888] uppercase">Selected Facility</div>
-                  <div className="text-base font-extrabold text-white">{selectedAssetId}</div>
-                  <div className="mt-2 text-[10px] space-y-1 border-t border-[#333] pt-2">
-                    <div className="flex justify-between">
-                      <span className="text-[#888]">Fault Prediction:</span>
-                      <span className="font-bold text-[#1c69d4]">{livePrediction?.predicted_fault_mode || "Evaluating"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#888]">Failure Probability:</span>
-                      <span className="font-bold text-[#e22718]">{livePrediction?.failure_probability ? `${Math.round(livePrediction.failure_probability * 100)}%` : "Calculating"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#888]">Health Index:</span>
-                      <span className="font-bold text-white">{livePrediction?.health_score || 55}/100</span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setActiveTab("predictions")}
-                    className="w-full mt-3 bg-[#1c69d4] text-white text-[9px] font-bold uppercase py-1 hover:bg-[#0066b1]"
-                  >
-                    Open in AI Testing Studio &rarr;
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* VIEW 3: ASSET INVENTORY */}
-        {activeTab === "assets" && (
-          <div className="p-5 space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-lg font-bold uppercase">Grid Asset Inventory</h1>
-                <p className="text-[10px] text-[#888]">Database: 230 Total Assets across Gujarat Districts</p>
-              </div>
-              <div className="text-[10px] text-[#888]">Showing {assetsList.length} records</div>
-            </div>
-            <div className="bg-[#1a1a1a] border border-[#3c3c3c] overflow-x-auto">
-              <table className="w-full text-[10px]">
-                <thead className="bg-[#111] border-b border-[#3c3c3c] text-left uppercase text-[#777]">
-                  <tr>
-                    <th className="p-2.5">Asset ID</th>
-                    <th className="p-2.5">Name</th>
-                    <th className="p-2.5">Type</th>
-                    <th className="p-2.5">District</th>
-                    <th className="p-2.5 text-right">Capacity (MVA)</th>
-                    <th className="p-2.5 text-right">Voltage (kV)</th>
-                    <th className="p-2.5 text-right">Customers</th>
-                    <th className="p-2.5 text-center">Status</th>
-                    <th className="p-2.5 text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#2a2a2a]">
-                  {assetsList
-                    .filter((a) => !searchTerm || a.asset_id.toLowerCase().includes(searchTerm.toLowerCase()) || (a.district && a.district.toLowerCase().includes(searchTerm.toLowerCase())))
-                    .map((a) => (
-                      <tr key={a.id} className="hover:bg-[#222]">
-                        <td className="p-2.5 font-bold text-white">{a.asset_id}</td>
-                        <td className="p-2.5 text-[#bbb]">{a.name}</td>
-                        <td className="p-2.5 uppercase text-[#888]">{a.asset_type}</td>
-                        <td className="p-2.5 text-[#bbb]">{a.district}</td>
-                        <td className="p-2.5 text-right font-mono">{a.capacity_mva || "--"}</td>
-                        <td className="p-2.5 text-right font-mono">{a.voltage_kv} kV</td>
-                        <td className="p-2.5 text-right font-mono">{(a.customers_served || 0).toLocaleString()}</td>
-                        <td className="p-2.5 text-center">
-                          <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase ${a.status === "ACTIVE" ? "bg-[#0fa336] text-white" : "bg-[#f4b400] text-black"}`}>
-                            {a.status}
-                          </span>
-                        </td>
-                        <td className="p-2.5 text-center">
-                          <button
-                            onClick={() => {
-                              selectAsset(a.asset_id);
-                              setActiveTab("dashboard");
-                            }}
-                            className="text-[#1c69d4] hover:underline font-bold"
-                          >
-                            Inspect
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* VIEW 4: LIVE AI PREDICTOR & TESTING STUDIO (FOR JUDGES!) */}
-        {activeTab === "predictions" && (
-          <div className="p-5 space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-lg font-bold uppercase flex items-center gap-2">
-                  <Cpu className="text-[#1c69d4]" size={20} />
-                  AI Failure Prediction Studio & Live Bench
-                </h1>
-                <p className="text-[10px] text-[#888]">
-                  Trained on DGA oil telemetry and operational sensor readings &bull; Powered by XGBoost Regressor & Classifier
-                </p>
-              </div>
-              <div className="flex items-center gap-2 bg-[#161616] border border-[#333] px-3 py-1">
-                <span className="text-[9px] text-[#888] uppercase">Model Accuracy:</span>
-                <span className="text-xs font-bold text-[#0fa336]">{modelInfo?.metrics?.accuracy ? `${(modelInfo.metrics.accuracy * 100).toFixed(1)}%` : "96.3%"}</span>
-                <span className="text-[9px] text-[#888] uppercase ml-2">RMSE:</span>
-                <span className="text-xs font-bold text-[#1c69d4]">{modelInfo?.metrics?.rmse ? modelInfo.metrics.rmse.toFixed(4) : "0.0797"}</span>
-              </div>
-            </div>
-
-            <div className="m-stripe" />
-
-            {/* DEMO SCENARIO PRESETS FOR THE JUDGE */}
-            <div className="bg-[#1a1a1a] border border-[#3c3c3c] p-3">
-              <div className="text-[9px] text-[#888] font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Sliders size={12} /> Instant Demo Scenarios for Judges (Click to load & evaluate live)
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                <button
-                  onClick={() => applyPreset("normal")}
-                  className="bg-[#111] hover:bg-[#222] border border-[#333] p-2 text-left transition-all group"
-                >
-                  <div className="font-bold text-[10px] text-[#0fa336] uppercase flex items-center justify-between">
-                    1. Safe Operation <ChevronRight size={10} className="group-hover:translate-x-1 transition-transform" />
-                  </div>
-                  <div className="text-[9px] text-[#777] mt-0.5">Normal gas & low temp (48°C)</div>
-                </button>
-
-                <button
-                  onClick={() => applyPreset("arcing")}
-                  className="bg-[#111] hover:bg-[#222] border border-[#e22718]/50 p-2 text-left transition-all group"
-                >
-                  <div className="font-bold text-[10px] text-[#e22718] uppercase flex items-center justify-between">
-                    2. Arcing / Breakdown <ChevronRight size={10} className="group-hover:translate-x-1 transition-transform" />
-                  </div>
-                  <div className="text-[9px] text-[#777] mt-0.5">High Acetylene (38 ppm) & Partial Discharge</div>
-                </button>
-
-                <button
-                  onClick={() => applyPreset("thermal")}
-                  className="bg-[#111] hover:bg-[#222] border border-[#f48c06]/50 p-2 text-left transition-all group"
-                >
-                  <div className="font-bold text-[10px] text-[#f48c06] uppercase flex items-center justify-between">
-                    3. Severe Thermal Overheating <ChevronRight size={10} className="group-hover:translate-x-1 transition-transform" />
-                  </div>
-                  <div className="text-[9px] text-[#777] mt-0.5">Oil Temp 94°C + 118% Load + Ethylene</div>
-                </button>
-
-                <button
-                  onClick={() => applyPreset("mechanical")}
-                  className="bg-[#111] hover:bg-[#222] border border-[#f4b400]/50 p-2 text-left transition-all group"
-                >
-                  <div className="font-bold text-[10px] text-[#f4b400] uppercase flex items-center justify-between">
-                    4. Mechanical Strain <ChevronRight size={10} className="group-hover:translate-x-1 transition-transform" />
-                  </div>
-                  <div className="text-[9px] text-[#777] mt-0.5">High Vibration (6.8 mm/s) + Core Looseness</div>
-                </button>
-              </div>
-            </div>
-
-            {/* LIVE INPUT FORM & RESULT DISPLAY */}
-            <div className="grid grid-cols-3 gap-4">
-              {/* Left 2 Cols: Interactive Sensor Sliders */}
-              <div className="col-span-2 bg-[#1a1a1a] border border-[#3c3c3c] p-4 space-y-4">
-                <div className="flex justify-between items-center border-b border-[#333] pb-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider">Live Input Telemetry (Adjustable)</h3>
-                  <span className="text-[9px] text-[#888]">Simulate any sensor or oil condition</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="flex justify-between text-[10px] mb-1 text-[#bbb]">
-                      <span>Winding Temperature (°C)</span>
-                      <span className="font-bold text-white">{simTemp}°C</span>
-                    </label>
-                    <input type="range" min="30" max="115" value={simTemp} onChange={(e) => setSimTemp(Number(e.target.value))} className="w-full accent-[#1c69d4]" />
-                  </div>
-
-                  <div>
-                    <label className="flex justify-between text-[10px] mb-1 text-[#bbb]">
-                      <span>Oil Temperature (°C)</span>
-                      <span className="font-bold text-white">{simOilTemp}°C</span>
-                    </label>
-                    <input type="range" min="25" max="110" value={simOilTemp} onChange={(e) => setSimOilTemp(Number(e.target.value))} className="w-full accent-[#1c69d4]" />
-                  </div>
-
-                  <div>
-                    <label className="flex justify-between text-[10px] mb-1 text-[#bbb]">
-                      <span>Vibration Velocity (mm/s)</span>
-                      <span className="font-bold text-white">{simVibration} mm/s</span>
-                    </label>
-                    <input type="range" min="0.5" max="8.0" step="0.1" value={simVibration} onChange={(e) => setSimVibration(Number(e.target.value))} className="w-full accent-[#1c69d4]" />
-                  </div>
-
-                  <div>
-                    <label className="flex justify-between text-[10px] mb-1 text-[#bbb]">
-                      <span>Operational Load (%)</span>
-                      <span className="font-bold text-white">{simLoad}%</span>
-                    </label>
-                    <input type="range" min="30" max="130" value={simLoad} onChange={(e) => setSimLoad(Number(e.target.value))} className="w-full accent-[#1c69d4]" />
-                  </div>
-
-                  <div>
-                    <label className="flex justify-between text-[10px] mb-1 text-[#bbb]">
-                      <span>Acetylene (C2H2) - Arcing Gas (ppm)</span>
-                      <span className={`font-bold ${simAcetylene > 10 ? "text-[#e22718]" : "text-white"}`}>{simAcetylene} ppm</span>
-                    </label>
-                    <input type="range" min="0" max="50" step="0.5" value={simAcetylene} onChange={(e) => setSimAcetylene(Number(e.target.value))} className="w-full accent-[#e22718]" />
-                  </div>
-
-                  <div>
-                    <label className="flex justify-between text-[10px] mb-1 text-[#bbb]">
-                      <span>Ethylene (C2H4) - Thermal Gas (ppm)</span>
-                      <span className={`font-bold ${simEthylene > 80 ? "text-[#f48c06]" : "text-white"}`}>{simEthylene} ppm</span>
-                    </label>
-                    <input type="range" min="0" max="180" value={simEthylene} onChange={(e) => setSimEthylene(Number(e.target.value))} className="w-full accent-[#f48c06]" />
-                  </div>
-
-                  <div>
-                    <label className="flex justify-between text-[10px] mb-1 text-[#bbb]">
-                      <span>Hydrogen (H2) - Partial Discharge (ppm)</span>
-                      <span className="font-bold text-white">{simHydrogen} ppm</span>
-                    </label>
-                    <input type="range" min="0" max="250" value={simHydrogen} onChange={(e) => setSimHydrogen(Number(e.target.value))} className="w-full accent-[#1c69d4]" />
-                  </div>
-
-                  <div>
-                    <label className="flex justify-between text-[10px] mb-1 text-[#bbb]">
-                      <span>Methane (CH4) - Decomposition (ppm)</span>
-                      <span className="font-bold text-white">{simMethane} ppm</span>
-                    </label>
-                    <input type="range" min="0" max="200" value={simMethane} onChange={(e) => setSimMethane(Number(e.target.value))} className="w-full accent-[#1c69d4]" />
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <button
-                    onClick={() => handleSimulate()}
-                    disabled={simulating}
-                    className="w-full bg-[#1c69d4] hover:bg-[#0066b1] text-white py-2.5 font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-                  >
-                    <Play size={14} fill="currentColor" />
-                    {simulating ? "Evaluating XGBoost Decision Trees..." : "Run Live XGBoost AI Inference"}
-                  </button>
-                </div>
-              </div>
-
-              {/* Right Col: Live Inference Output */}
-              <div className="bg-[#1a1a1a] border border-[#3c3c3c] p-4 flex flex-col justify-between">
+          {/* VIEW 7: ASSET INVENTORY */}
+          {activeTab === "assets" && (
+            <div className="space-y-4 pb-10">
+              <div className="bg-white p-4 rounded-xl border border-[#e7e5e0] shadow-xs flex justify-between items-center">
                 <div>
-                  <div className="flex justify-between items-center border-b border-[#333] pb-2 mb-3">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-white">Inference Result</h3>
-                    <span className="text-[9px] bg-[#222] px-1.5 py-0.5 text-[#0fa336] font-bold">XGBoost v1.0</span>
-                  </div>
-
-                  {simResult ? (
-                    <div className="space-y-3">
-                      <div>
-                        <div className="text-[9px] text-[#888] uppercase">Classified Fault Mode</div>
-                        <div className="text-sm font-extrabold uppercase text-white mt-0.5">
-                          {simResult.predicted_fault_mode}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 bg-[#111] p-2.5 border border-[#333]">
-                        <div>
-                          <div className="text-[8px] text-[#888] uppercase">Failure Probability</div>
-                          <div className={`text-xl font-extrabold ${simResult.failure_probability > 0.6 ? "text-[#e22718]" : simResult.failure_probability > 0.3 ? "text-[#f4b400]" : "text-[#0fa336]"}`}>
-                            {Math.round(simResult.failure_probability * 100)}%
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[8px] text-[#888] uppercase">Health Index</div>
-                          <div className="text-xl font-extrabold text-white">
-                            {Math.round(simResult.health_score)}/100
-                          </div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-[9px] text-[#888] uppercase mb-1">Time Horizon Window</div>
-                        <div className="inline-block bg-[#222] border border-[#444] px-2 py-0.5 text-[10px] font-bold text-[#1c69d4] uppercase">
-                          Within {simResult.risk_window}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-[9px] text-[#888] uppercase mb-1">Top Contributing Factors (SHAP)</div>
-                        <div className="space-y-1">
-                          {simResult.top_drivers?.map((d: any, i: number) => (
-                            <div key={i} className="flex justify-between text-[9px] bg-[#111] px-2 py-1 border border-[#222]">
-                              <span className="text-[#aaa] uppercase">{d.feature.replace(/_/g, " ")}: {d.value}</span>
-                              <span className="font-bold text-[#1c69d4]">{(d.weight * 100).toFixed(1)}%</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-12 text-center text-[#666]">
-                      <Cpu size={32} className="mb-2 opacity-50" />
-                      <div>Adjust sliders or click a scenario to generate real-time AI prediction.</div>
-                    </div>
-                  )}
+                  <h1 className="text-base font-bold text-[#1E3932]">Gujarat Grid Asset Inventory</h1>
+                  <p className="text-xs text-gray-500">
+                    Database: 836 Monitored Facilities across all 33 Gujarat Districts
+                  </p>
                 </div>
+                <div className="w-64 relative">
+                  <input
+                    type="text"
+                    placeholder="Search by ID or District..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 border border-gray-300 rounded-full text-xs focus:outline-hidden focus:border-[#00754A]"
+                  />
+                  <Search size={14} className="absolute left-2.5 top-2 text-gray-400" />
+                </div>
+              </div>
 
-                {simResult && (
-                  <div className="mt-3 p-2.5 bg-[#161616] border-l-2 border-[#1c69d4] text-[9px] text-[#aaa]">
-                    <div className="font-bold text-white uppercase mb-0.5">Automated AI Mitigation:</div>
-                    {simResult.recommended_action}
-                  </div>
-                )}
+              <div className="sb-card overflow-hidden">
+                <div className="overflow-x-auto max-h-[500px]">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-[#faf9f6] border-b border-gray-200 text-gray-500 uppercase text-[9px] font-bold">
+                      <tr>
+                        <th className="p-3 text-left">Asset ID</th>
+                        <th className="p-3 text-left">Facility Name</th>
+                        <th className="p-3 text-left">Type</th>
+                        <th className="p-3 text-left">District</th>
+                        <th className="p-3 text-right">Capacity (MVA)</th>
+                        <th className="p-3 text-right">Voltage (kV)</th>
+                        <th className="p-3 text-right">Consumers</th>
+                        <th className="p-3 text-center">Status</th>
+                        <th className="p-3 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {assetsList
+                        .filter(
+                          (a) =>
+                            !searchTerm ||
+                            a.asset_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            (a.district && a.district.toLowerCase().includes(searchTerm.toLowerCase()))
+                        )
+                        .map((a) => (
+                          <tr key={a.id} className="hover:bg-[#faf9f6] transition-colors">
+                            <td className="p-3 font-bold text-[#1E3932]">{a.asset_id}</td>
+                            <td className="p-3 text-gray-800">{a.name}</td>
+                            <td className="p-3 capitalize text-gray-600">{a.asset_type?.replace(/_/g, " ")}</td>
+                            <td className="p-3 text-gray-700">{a.district}</td>
+                            <td className="p-3 text-right font-mono">{a.capacity_mva || "--"}</td>
+                            <td className="p-3 text-right font-mono">{a.voltage_kv} kV</td>
+                            <td className="p-3 text-right font-mono">{(a.customers_served || 0).toLocaleString()}</td>
+                            <td className="p-3 text-center">
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#d4e9e2] text-[#006241]">
+                                {a.status}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center">
+                              <button
+                                onClick={() => handleFocusOnMap(a.asset_id)}
+                                className="sb-pill-btn sb-btn-outline !py-0.5 !px-2.5 text-[10px]"
+                              >
+                                View on Map
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* VIEW 5: CREW PLANNING */}
-        {activeTab === "crews" && (
-          <div className="p-5 space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-lg font-bold uppercase">Field Crew Positioning & Dispatch</h1>
-                <p className="text-[10px] text-[#888]">12 Gujarat Field Teams across 6 operational zones</p>
+          {/* VIEW 8: INCIDENTS LOG */}
+          {activeTab === "incidents" && (
+            <div className="space-y-4 pb-10">
+              <div className="bg-white p-4 rounded-xl border border-[#e7e5e0] shadow-xs flex justify-between items-center">
+                <div>
+                  <h1 className="text-base font-bold text-[#1E3932]">Grid Fault &amp; Outage Incident Records</h1>
+                  <p className="text-xs text-gray-500">Historical fault log mapped to Gujarat electrical assets</p>
+                </div>
+                <div className="text-xs text-gray-600 font-semibold">{incidentsList.length} Logged Incidents</div>
               </div>
-              <div className="text-[10px] text-[#0fa336] font-bold">
-                {crewsList.filter((c) => c.available).length} Crews Available
+
+              <div className="sb-card overflow-hidden">
+                <div className="overflow-x-auto max-h-[500px]">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-[#faf9f6] border-b border-gray-200 text-gray-500 uppercase text-[9px] font-bold">
+                      <tr>
+                        <th className="p-3 text-left">Incident ID</th>
+                        <th className="p-3 text-left">Fault Category</th>
+                        <th className="p-3 text-center">Severity</th>
+                        <th className="p-3 text-right">Consumers Affected</th>
+                        <th className="p-3 text-right">Duration</th>
+                        <th className="p-3 text-right">Downtime</th>
+                        <th className="p-3 text-left">Weather</th>
+                        <th className="p-3 text-left">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {incidentsList.map((inc) => (
+                        <tr key={inc.id} className="hover:bg-[#faf9f6] transition-colors">
+                          <td className="p-3 font-bold text-[#1E3932]">INC-{inc.id}</td>
+                          <td className="p-3 text-gray-800">{inc.fault_type || "Electrical Anomaly"}</td>
+                          <td className="p-3 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                inc.severity === "CRITICAL"
+                                  ? "bg-[#c82014] text-white"
+                                  : inc.severity === "HIGH"
+                                  ? "bg-[#e67e22] text-white"
+                                  : "bg-[#cba258] text-white"
+                              }`}
+                            >
+                              {inc.severity}
+                            </span>
+                          </td>
+                          <td className="p-3 text-right font-mono">
+                            {(inc.customers_affected || 0).toLocaleString()}
+                          </td>
+                          <td className="p-3 text-right font-mono">
+                            {inc.duration_hrs ? inc.duration_hrs.toFixed(1) : "--"}h
+                          </td>
+                          <td className="p-3 text-right font-mono">
+                            {inc.downtime_hrs ? inc.downtime_hrs.toFixed(1) : "--"}h
+                          </td>
+                          <td className="p-3 text-gray-600">{inc.weather_condition || "Clear"}</td>
+                          <td className="p-3 text-gray-500">{new Date(inc.started_at).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
+          )}
 
-            <div className="grid grid-cols-3 gap-3">
-              {crewsList.map((crew) => (
-                <div key={crew.id} className="bg-[#1a1a1a] border border-[#3c3c3c] p-3 flex flex-col justify-between">
-                  <div>
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <div className="text-xs font-bold uppercase text-white">{crew.name}</div>
-                        <div className="text-[9px] text-[#888]">{crew.crew_id} &bull; {crew.zone}</div>
-                      </div>
-                      <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase ${crew.available ? "bg-[#0fa336] text-white" : "bg-[#e22718] text-white"}`}>
-                        {crew.available ? "Available" : "Dispatched"}
-                      </span>
-                    </div>
-                    <div className="text-[9px] text-[#aaa] space-y-0.5 border-t border-[#333] pt-2">
-                      <div>Skill Level: <span className="font-bold text-white uppercase">{crew.skill_level.replace(/_/g, " ")}</span></div>
-                      <div>GPS: {crew.latitude.toFixed(3)}, {crew.longitude.toFixed(3)}</div>
-                    </div>
-                  </div>
-                  <button
-                    disabled={!crew.available}
-                    className="mt-3 w-full bg-[#1c69d4] hover:bg-[#0066b1] disabled:bg-[#222] disabled:text-[#666] text-white text-[9px] font-bold uppercase py-1.5 transition-colors"
+          {/* VIEW 9: EMERGENCY ALERTS CENTER */}
+          {activeTab === "alerts" && (
+            <div className="space-y-4 pb-10">
+              <div className="bg-white p-4 rounded-xl border border-[#e7e5e0] shadow-xs flex justify-between items-center">
+                <div>
+                  <h1 className="text-base font-bold text-[#1E3932]">Emergency Alert Dispatch Center</h1>
+                  <p className="text-xs text-gray-500">
+                    Active High &amp; Critical Risks across the Gujarat Power Grid
+                  </p>
+                </div>
+                <div className="text-xs font-bold text-[#c82014] bg-red-100 px-3 py-1 rounded-full">
+                  {alerts.length} Active Emergencies
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {alerts.map((a: any, i: number) => (
+                  <div
+                    key={i}
+                    className="sb-card p-4 flex justify-between items-center hover:border-[#00754A] transition-all"
                   >
-                    {crew.available ? "Dispatch to Nearest Incident" : "In Field Assignment"}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* VIEW 6: INCIDENTS LOG */}
-        {activeTab === "incidents" && (
-          <div className="p-5 space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-lg font-bold uppercase">Grid Outage & Incident Log</h1>
-                <p className="text-[10px] text-[#888]">Historical records from fault_data.csv mapped to Gujarat assets</p>
-              </div>
-              <div className="text-[10px] text-[#888]">{incidentsList.length} Logged Events</div>
-            </div>
-
-            <div className="bg-[#1a1a1a] border border-[#3c3c3c] overflow-x-auto">
-              <table className="w-full text-[10px]">
-                <thead className="bg-[#111] border-b border-[#3c3c3c] text-left uppercase text-[#777]">
-                  <tr>
-                    <th className="p-2.5">Incident ID</th>
-                    <th className="p-2.5">Fault Type</th>
-                    <th className="p-2.5 text-center">Severity</th>
-                    <th className="p-2.5 text-right">Customers Affected</th>
-                    <th className="p-2.5 text-right">Duration (hrs)</th>
-                    <th className="p-2.5 text-right">Downtime (hrs)</th>
-                    <th className="p-2.5">Weather</th>
-                    <th className="p-2.5">Date</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#2a2a2a]">
-                  {incidentsList.map((inc) => (
-                    <tr key={inc.id} className="hover:bg-[#222]">
-                      <td className="p-2.5 font-bold text-white">INC-{inc.id}</td>
-                      <td className="p-2.5 text-[#bbb]">{inc.fault_type || "Electrical Fault"}</td>
-                      <td className="p-2.5 text-center">
-                        <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase ${
-                          inc.severity === "CRITICAL" ? "bg-[#e22718] text-white" : inc.severity === "HIGH" ? "bg-[#f48c06] text-white" : "bg-[#f4b400] text-black"
-                        }`}>
-                          {inc.severity}
-                        </span>
-                      </td>
-                      <td className="p-2.5 text-right font-mono text-white">{(inc.customers_affected || 0).toLocaleString()}</td>
-                      <td className="p-2.5 text-right font-mono">{inc.duration_hrs ? inc.duration_hrs.toFixed(1) : "--"}h</td>
-                      <td className="p-2.5 text-right font-mono">{inc.downtime_hrs ? inc.downtime_hrs.toFixed(1) : "--"}h</td>
-                      <td className="p-2.5 text-[#888]">{inc.weather_condition || "Clear"}</td>
-                      <td className="p-2.5 text-[#888]">{new Date(inc.started_at).toLocaleDateString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* VIEW 7: SENSORS STREAM */}
-        {activeTab === "sensors" && (
-          <div className="p-5 space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-lg font-bold uppercase">Live SCADA Sensor Telemetry Stream</h1>
-                <p className="text-[10px] text-[#888]">31,271 Synchronized Sensor Readings &bull; Overview, Power, Current & Voltage</p>
-              </div>
-            </div>
-            <div className="bg-[#1a1a1a] border border-[#3c3c3c] p-4 text-center py-12 text-[#888]">
-              <Activity size={32} className="mx-auto mb-2 text-[#1c69d4] animate-pulse" />
-              <div className="text-white font-bold uppercase text-xs">Live Telemetry Ingestion Active</div>
-              <div className="text-[10px] text-[#666] mt-1">Polling all 230 Gujarat transformers and substations on a 15-second cycle.</div>
-              <button onClick={() => setActiveTab("dashboard")} className="mt-4 bg-[#1c69d4] text-white text-[10px] font-bold uppercase px-4 py-1.5 hover:bg-[#0066b1]">
-                Return to Real-Time Dashboard &rarr;
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* VIEW 8: ALERTS QUEUE */}
-        {activeTab === "alerts" && (
-          <div className="p-5 space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-lg font-bold uppercase">Emergency Alert Dispatch Center</h1>
-                <p className="text-[10px] text-[#888]">Active High & Critical Risks across the Gujarat Power Grid</p>
-              </div>
-              <div className="text-[10px] text-[#e22718] font-bold">{alerts.length} Active Incidents</div>
-            </div>
-            <div className="space-y-2">
-              {alerts.map((a: any, i: number) => (
-                <div key={i} className="bg-[#1a1a1a] border border-[#3c3c3c] p-3 flex justify-between items-center hover:bg-[#222]">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 flex items-center justify-center ${a.severity === "CRITICAL" ? "bg-[#e22718]" : "bg-[#f4b400]"} text-white`}>
-                      <AlertTriangle size={16} />
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                          a.severity === "CRITICAL" ? "bg-[#c82014]" : "bg-[#fbbc05]"
+                        } text-white shadow-xs`}
+                      >
+                        <AlertTriangle size={18} />
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-[#1E3932]">
+                          {a.asset_id} &bull; {a.fault_type}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {(a.customers_affected || 0).toLocaleString()} customers affected &bull; Reported{" "}
+                          {new Date(a.started_at).toLocaleDateString()}
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-xs font-bold text-white">{a.asset_id} &bull; {a.fault_type}</div>
-                      <div className="text-[9px] text-[#888]">{a.customers_affected?.toLocaleString()} customers affected &bull; Reported {new Date(a.started_at).toLocaleDateString()}</div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleFocusOnMap(a.asset_id)}
+                        className="sb-pill-btn sb-btn-outline !py-1.5 !px-3 text-xs"
+                      >
+                        Focus on Map
+                      </button>
+                      <button
+                        onClick={() => openDispatchForAlert(a)}
+                        className="sb-pill-btn sb-btn-primary !py-1.5 !px-3 text-xs"
+                      >
+                        Dispatch Crew
+                      </button>
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => { selectAsset(a.asset_id); setActiveTab("dashboard"); }} className="bg-[#111] border border-[#333] text-white px-3 py-1 text-[9px] font-bold uppercase hover:bg-[#222]">
-                      Focus on Map
-                    </button>
-                    <button className="bg-[#1c69d4] text-white px-3 py-1 text-[9px] font-bold uppercase hover:bg-[#0066b1]">
-                      Dispatch Crew
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-      </main>
+          )}
+        </main>
+
+        {/* FLOATING SIGNATURE "FRAP" ACTION BUTTON (STARBUCKS 56px CIRCULAR CTA) */}
+        <div className="fixed bottom-6 right-6 z-40">
+          <button
+            onClick={() => {
+              if (alerts.length > 0) {
+                openDispatchForAlert(alerts[0]);
+              } else {
+                setShowCreateWO(true);
+              }
+            }}
+            className="sb-frap-btn group"
+            title="Emergency Quick Dispatch"
+          >
+            <Send size={22} className="group-hover:rotate-12 transition-transform" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
-function NavItem({ icon, label, active, badge, onClick }: { icon: React.ReactNode; label: string; active?: boolean; badge?: string; onClick?: () => void }) {
+// NAVIGATION ITEM HELPER COMPONENT
+function NavItem({
+  icon,
+  label,
+  active,
+  badge,
+  badgeColor = "bg-[#00754A]",
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  active?: boolean;
+  badge?: string;
+  badgeColor?: string;
+  onClick?: () => void;
+}) {
   return (
-    <div
+    <button
       onClick={onClick}
-      className={`flex items-center justify-between px-2 py-1.5 cursor-pointer transition-colors ${
-        active ? "bg-[#1c69d4]/20 border-l-2 border-[#1c69d4] text-white font-bold" : "text-[#bbbbbb] hover:bg-[#1a1a1a] hover:text-white"
+      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold tracking-tight transition-all cursor-pointer ${
+        active
+          ? "bg-[#00754A] text-white shadow-xs"
+          : "text-white/80 hover:bg-white/10 hover:text-white"
       }`}
     >
-      <div className="flex items-center gap-2 uppercase tracking-wider text-[10px]">
+      <div className="flex items-center gap-2.5">
         {icon}
         <span>{label}</span>
       </div>
-      {badge && <span className="bg-[#e22718] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{badge}</span>}
-    </div>
+      {badge && (
+        <span className={`${badgeColor} text-white text-[9px] font-bold px-2 py-0.5 rounded-full`}>
+          {badge}
+        </span>
+      )}
+    </button>
   );
 }
 
+// KPI CARD HELPER COMPONENT (STARBUCKS 12px CARD)
 function KpiCard({ icon, title, value, trend, trendUp, sub }: any) {
   return (
-    <div className="bg-[#1a1a1a] border border-[#3c3c3c] p-4">
-      <div className="w-8 h-8 bg-[#262626] flex items-center justify-center mb-3">{icon}</div>
-      <div className="text-[9px] text-[#bbbbbb] font-bold uppercase tracking-widest mb-0.5">{title}</div>
-      <div className="text-2xl font-bold uppercase">{value}</div>
-      {trend && <div className={`text-[10px] mt-1 font-bold ${trendUp ? "text-[#0fa336]" : "text-[#e22718]"}`}>{trend}</div>}
-      {sub && <div className="text-[10px] text-[#7e7e7e] mt-1 font-light">{sub}</div>}
-    </div>
-  );
-}
-
-function AlertItem({ icon, type, title, desc, time }: any) {
-  const bg = type === "critical" ? "bg-[#e22718]" : type === "warning" ? "bg-[#f4b400]" : "bg-[#0fa336]";
-  return (
-    <div className="flex gap-3 border-b border-[#3c3c3c] pb-2.5 last:border-0 last:pb-0">
-      <div className={`w-6 h-6 flex-shrink-0 flex items-center justify-center ${bg} text-white`}>{icon}</div>
-      <div className="flex-1 min-w-0">
-        <div className="text-[11px] font-bold uppercase truncate">{title}</div>
-        <div className="text-[9px] text-[#bbbbbb] font-light">{desc}</div>
+    <div className="sb-card p-4 flex flex-col justify-between">
+      <div>
+        <div className="w-8 h-8 rounded-full bg-[#f2f0eb] flex items-center justify-center mb-3">
+          {icon}
+        </div>
+        <div className="text-[11px] text-gray-500 font-semibold tracking-tight uppercase mb-0.5">
+          {title}
+        </div>
+        <div className="text-2xl font-extrabold text-[#1E3932] tracking-tight">{value}</div>
       </div>
-      <div className="text-[9px] text-[#7e7e7e] whitespace-nowrap pt-0.5 font-bold">{time}</div>
-    </div>
-  );
-}
-
-function ActionItem({ icon, type, title, desc, priority, btn, btnOutline }: any) {
-  const bg = type === "critical" ? "bg-[#e22718]" : type === "warning" ? "bg-[#f4b400]" : "bg-[#262626] border border-[#3c3c3c]";
-  return (
-    <div className="flex gap-3 border-b border-[#3c3c3c] pb-3 last:border-0 last:pb-0 items-center">
-      <div className={`w-8 h-8 flex-shrink-0 flex items-center justify-center ${bg} text-white`}>{icon}</div>
-      <div className="flex-1 min-w-0">
-        <div className="text-[11px] font-bold uppercase truncate">{title}</div>
-        <div className="text-[9px] text-[#bbbbbb] font-light">{desc}</div>
-      </div>
-      <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-        <span className={`text-[9px] uppercase font-bold tracking-widest ${priority === "Priority 1" ? "text-[#e22718]" : "text-[#f4b400]"}`}>{priority}</span>
-        <button className={`px-3 py-1 text-[9px] font-bold uppercase tracking-widest transition-colors whitespace-nowrap ${btnOutline ? "border border-white text-white hover:bg-white hover:text-black" : "bg-[#1c69d4] text-white hover:bg-[#0066b1]"}`}>{btn}</button>
+      <div>
+        {trend && (
+          <div className={`text-xs mt-1 font-bold ${trendUp ? "text-[#00754A]" : "text-[#c82014]"}`}>
+            {trend}
+          </div>
+        )}
+        {sub && <div className="text-[10px] text-gray-500 mt-1">{sub}</div>}
       </div>
     </div>
   );

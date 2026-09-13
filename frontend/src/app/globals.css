@@ -5,160 +5,158 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* BMW M Design System */
-  --canvas: #000000;
-  --surface-card: #1a1a1a;
-  --surface-elevated: #262626;
-  --hairline: #3c3c3c;
+  /* Starbucks Design System Tokens */
+  --canvas: #f2f0eb;              /* Neutral Warm Canvas */
+  --canvas-ceramic: #edebe9;      /* Ceramic off-white */
+  --surface-card: #ffffff;        /* Crisp White Content Cards */
+  --surface-subtle: #f9f9f9;      /* Neutral Cool */
+  
+  --house-green: #1E3932;         /* Deep House Green (nav, hero bands, dark panels) */
+  --starbucks-green: #006241;     /* Historic Starbucks Brand Green */
+  --green-accent: #00754A;        /* Green Accent (Primary CTAs, Frap button) */
+  --green-uplift: #2b5148;        /* Green Uplift (mid-dark decorative) */
+  --green-light: #d4e9e2;         /* Pale Mint Wash (tags, safe badges) */
+  
+  --gold: #cba258;                /* Gold Accent (P1 / Status / Ceremony) */
+  --gold-light: #dfc49d;          /* Softer gold */
+  --gold-lightest: #faf6ee;       /* Warm cream-gold wash */
 
-  --on-dark: #ffffff;
-  --body: #bbbbbb;
-  --muted: oklch(0.97 0 0);
+  --danger-red: #c82014;          /* Critical / Emergency Red */
+  --warning-amber: #fbbc05;       /* Warning Amber */
+  --success-green: #00754A;       /* Operational Green */
 
-  --m-blue-light: #0066b1;
-  --m-blue-dark: #1c69d4;
-  --m-red: #e22718;
+  --text-black: rgba(0, 0, 0, 0.87);       /* Body / Heading text on light */
+  --text-black-soft: rgba(0, 0, 0, 0.58);  /* Metadata text on light */
+  --text-white: rgba(255, 255, 255, 0.95); /* Headings on dark surfaces */
+  --text-white-soft: rgba(255, 255, 255, 0.70); /* Secondary on dark surfaces */
 
-  --warning: #f4b400;
-  --success: #0fa336;
-  --critical: #e22718;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-@theme inline {
-  --color-background: var(--canvas);
-  --color-foreground: var(--on-dark);
-
-  --color-card: var(--surface-card);
-  --color-card-foreground: var(--on-dark);
-
-  --color-border: var(--hairline);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--body);
-
-  --color-primary: var(--on-dark);
-  --color-primary-foreground: var(--canvas);
-
-  --color-destructive: var(--m-red);
-  --color-warning: var(--warning);
-  --color-success: var(--success);
-  --font-heading: var(--font-sans);
-  --font-sans: var(--font-sans);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --hairline: #e2dfd9;            /* Subtle warm cream borders */
+  --card-radius: 12px;
+  --button-radius: 50px;          /* Universal 50px full-pill */
 }
 
 body {
-  background: var(--color-background);
-  color: var(--color-foreground);
-  font-family: Inter, Arial, sans-serif;
+  background: var(--canvas);
+  color: var(--text-black);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
 }
 
-.m-stripe {
-  background: linear-gradient(90deg, var(--m-blue-light) 0%, var(--m-blue-dark) 50%, var(--m-red) 100%);
-  height: 4px;
-  width: 100%;
+/* Starbucks 12px Content Cards with Whisper-Soft Dual-Shadow */
+.sb-card {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e7e5e0;
+  box-shadow: 0 0 0.5px rgba(0, 0, 0, 0.14), 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+.sb-card-dark {
+  background: #1E3932;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  color: #ffffff;
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-  html {
-    @apply font-sans;
-  }
+/* Universal Starbucks 50px Full-Pill Buttons with scale(0.95) Active Press */
+.sb-pill-btn {
+  border-radius: 50px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.sb-pill-btn:active {
+  transform: scale(0.95);
+}
+
+.sb-btn-primary {
+  background: #00754A;
+  color: #ffffff;
+  border: 1px solid #00754A;
+}
+
+.sb-btn-primary:hover {
+  background: #006241;
+  border-color: #006241;
+}
+
+.sb-btn-outline {
+  background: transparent;
+  color: #00754A;
+  border: 1.5px solid #00754A;
+}
+
+.sb-btn-outline:hover {
+  background: #d4e9e2;
+}
+
+.sb-btn-dark {
+  background: #000000;
+  color: #ffffff;
+  border: 1px solid #000000;
+}
+
+.sb-btn-dark:hover {
+  background: #222222;
+}
+
+.sb-btn-white {
+  background: #ffffff;
+  color: #00754A;
+  border: 1px solid #ffffff;
+}
+
+.sb-btn-white:hover {
+  background: #f2f0eb;
+}
+
+.sb-btn-white-outline {
+  background: transparent;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+.sb-btn-white-outline:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: #ffffff;
+}
+
+/* Floating 56px Frap Action Button */
+.sb-frap-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #00754A;
+  color: #ffffff;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.24), 0 8px 12px rgba(0, 0, 0, 0.18);
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.sb-frap-btn:hover {
+  background: #006241;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3), 0 12px 16px rgba(0, 0, 0, 0.22);
+}
+
+.sb-frap-btn:active {
+  transform: scale(0.95);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Global Nav Shadow Stack */
+.sb-nav-shadow {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 2px 2px rgba(0,0,0,0.06), 0 0 2px rgba(0,0,0,0.07);
 }
