@@ -88,12 +88,14 @@ def calculate_grid_impact(asset: Asset) -> float:
     voltage = asset.voltage_kv or 66.0
     capacity = asset.capacity_mva or 40.0
 
-    cust_norm = min(1.0, customers / 60000.0)
+    # Logarithmic population scaling (matches CPI formula in dashboard.py)
+    # log10(max(100, C)) / 5.301  → saturates at ~200k customers = 1.0
+    cust_norm = min(1.0, math.log10(max(100, customers)) / 5.301)
     fac_norm = min(1.0, facilities / 8.0)
     volt_norm = min(1.0, voltage / 400.0)
     cap_norm = min(1.0, capacity / 120.0)
 
-    # 35% customers + 25% critical facilities + 25% voltage class + 15% capacity
+    # 35% customers (log-scaled) + 25% critical facilities + 25% voltage class + 15% capacity
     score = (0.35 * cust_norm + 0.25 * fac_norm + 0.25 * volt_norm + 0.15 * cap_norm) * 100.0
     return round(score, 1)
 
@@ -179,8 +181,20 @@ def get_prioritised_maintenance_plan(
     if district:
         query = query.filter(Asset.district.ilike(f"%{district}%"))
 
-    # Order by highest overall risk score
-    results = query.order_by(RiskScore.overall_risk_score.desc()).all()
+    # Load all candidates without DB-side ordering; re-rank in Python using CPI
+    results_raw = query.all()
+
+    # Compute Composite Priority Index (CPI) for each asset — same formula as dashboard.py
+    # CPI = 0.55×RiskNorm + 0.35×LogCustomerNorm + 0.10×CritFacNorm
+    def _cpi(asset: Asset, risk: RiskScore) -> float:
+        r = min(1.0, max(0.0, float(risk.overall_risk_score or 50.0) / 100.0))
+        c = int(asset.customers_served or 15000)
+        c_norm = min(1.0, math.log10(max(100, c)) / 5.301)
+        f = int(asset.critical_facilities or 2)
+        f_norm = min(1.0, f / 8.0)
+        return round((0.55 * r + 0.35 * c_norm + 0.10 * f_norm) * 100.0, 1)
+
+    results = sorted(results_raw, key=lambda pair: _cpi(pair[0], pair[1]), reverse=True)
 
     work_orders = []
     idx = 100
@@ -295,6 +309,8 @@ def get_prioritised_maintenance_plan(
             "urgency_label": urgency_label,
             "urgency_color": urgency_color,
             "risk_score": round(risk_val, 1),
+            "composite_priority_score": _cpi(asset, risk),
+            "ranking_model": "CPI: 55% Risk + 35% Population + 10% Infra",
             "failure_probability_pct": round(fail_prob * 100.0, 1),
             "grid_impact_severity": impact_score,
             "weather_stress_index": round(weather_val, 1),

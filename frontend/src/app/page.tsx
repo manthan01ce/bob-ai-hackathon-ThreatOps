@@ -1781,7 +1781,7 @@ export default function Dashboard() {
                       <p className="text-[10px] text-gray-500">Click any row to focus on map &amp; inspect</p>
                     </div>
                     <span className="text-[10px] font-bold text-[#00754A] bg-[#d4e9e2] px-2 py-0.5 rounded-full">
-                      Ranked by Risk
+                      CPI: 55% Risk · 35% Population · 10% Infra
                     </span>
                   </div>
 
@@ -1791,22 +1791,23 @@ export default function Dashboard() {
                         <tr>
                           <th className="pb-2 text-left">Priority</th>
                           <th className="pb-2 text-left">Asset ID</th>
-                          <th className="pb-2 text-center">Risk</th>
+                          <th className="pb-2 text-center">CPI</th>
                           <th className="pb-2 text-center">Health</th>
                           <th className="pb-2 text-right">Consumers</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {topAssets.map((asset: any, idx: number) => {
-                          const riskScore = Math.round(asset.overall_risk_score || 50);
+                          const cpi = Math.round(asset.composite_priority_score || asset.overall_risk_score || 50);
                           const priorityLabel =
-                            riskScore >= 75 ? "P1" : riskScore >= 50 ? "P2" : riskScore >= 25 ? "P3" : "P4";
+                            cpi >= 75 ? "P1" : cpi >= 50 ? "P2" : cpi >= 25 ? "P3" : "P4";
                           const priorityColor =
-                            riskScore >= 75
+                            cpi >= 75
                               ? "bg-[#c82014] text-white"
-                              : riskScore >= 50
+                              : cpi >= 50
                               ? "bg-[#e67e22] text-white"
                               : "bg-[#cba258] text-white";
+                          const highPopulation = (asset.customers_served || 0) > 50000;
 
                           return (
                             <tr
@@ -1823,8 +1824,17 @@ export default function Dashboard() {
                                   {priorityLabel}
                                 </span>
                               </td>
-                              <td className="py-2.5 font-bold text-[#1E3932]">{asset.asset_id}</td>
-                              <td className="py-2.5 text-center font-bold text-[#c82014]">{riskScore}%</td>
+                              <td className="py-2.5 font-bold text-[#1E3932]">
+                                <div className="flex items-center gap-1">
+                                  {asset.asset_id}
+                                  {highPopulation && (
+                                    <span title="High population impact (>50k customers)" className="text-[8px] font-bold text-amber-700 bg-amber-100 px-1 py-0.5 rounded-full leading-none">
+                                      50k+
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2.5 text-center font-bold text-[#c82014]">{cpi}</td>
                               <td className="py-2.5 text-center font-semibold text-gray-700">
                                 {Math.round(asset.health_score || 50)}
                               </td>
