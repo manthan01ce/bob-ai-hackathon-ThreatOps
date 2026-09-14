@@ -132,5 +132,10 @@ export async function verifyScadaInterlock(woId: string) {
   return res.json();
 }
 
-
-
+export async function runBatchAudit() {
+  const res = await fetch(`${API_BASE}/predictions/batch-audit`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to run grid batch audit");
+  return res.json();
+}

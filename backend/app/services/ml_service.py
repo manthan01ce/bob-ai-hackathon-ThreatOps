@@ -184,6 +184,22 @@ def predict_failure(telemetry: Dict[str, Any]) -> Dict[str, Any]:
         risk_window = "7d"
         risk_level = "LOW"
 
+    # Recommended action synthesis
+    if is_tr:
+        if prob >= 0.75:
+            recommended_action = "Execute immediate emergency feeder load shedding, inspect distribution transformer oil level, and dispatch thermal imaging van."
+        elif prob >= 0.50:
+            recommended_action = "Schedule off-peak de-loading, re-tighten bus connections, and inspect cooling fins for debris blockages."
+        else:
+            recommended_action = "Asset operating within nominal IEC 60076-7 continuous loading envelope. Maintain routine SCADA telemetry surveillance."
+    else:
+        if "Arcing" in predicted_fault_mode or prob >= 0.75:
+            recommended_action = "IMMEDIATE TRIP ISOLATION: Confirm IEC 61850 busbar safety interlock, isolate breaker, and dispatch mobile oil filtration and degassing unit."
+        elif "Thermal" in predicted_fault_mode or prob >= 0.50:
+            recommended_action = "Activate forced radiator cooling bank, verify oil circulation pump flow, and sample DGA gases for C2H4 trend verification within 24 hours."
+        else:
+            recommended_action = "Substation transformer health optimal. Continue automated SCADA and DGA continuous monitoring."
+
     # Top drivers calculation
     feat_imps = _metadata.get("feature_importances", {})
     drivers = []
