@@ -96,7 +96,7 @@ export async function fetchPlanningSummary() {
 }
 
 export async function fetchMaintenancePlan(urgencyFilter?: string, district?: string) {
-  let url = `${API_BASE}/planning/maintenance-plan?limit=60`;
+  let url = `${API_BASE}/planning/maintenance-plan?limit=30`;
   if (urgencyFilter && urgencyFilter !== "ALL") url += `&urgency_filter=${urgencyFilter}`;
   if (district) url += `&district=${encodeURIComponent(district)}`;
   const res = await fetch(url);

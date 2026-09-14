@@ -643,7 +643,6 @@ export default function Dashboard() {
               icon={<ShieldAlert size={15} className="text-[#cba258]" />}
               label="AI Outage & Failure Advisor"
               active={activeTab === "advisor"}
-              badge="U1 Core"
               badgeColor="bg-[#00754A]"
               onClick={() => setActiveTab("advisor")}
             />
@@ -694,7 +693,6 @@ export default function Dashboard() {
               icon={<Cpu size={15} />}
               label="AI Predictor Studio"
               active={activeTab === "predictions"}
-              badge="XGBoost"
               badgeColor="bg-[#00754A]"
               onClick={() => setActiveTab("predictions")}
             />
@@ -1215,9 +1213,6 @@ export default function Dashboard() {
                 <div className="flex justify-between items-start">
                   <div>
                     <div className="flex items-center gap-2 mb-1.5">
-                      <span className="px-2.5 py-0.5 rounded-full bg-[#00754A] text-[10px] font-bold tracking-wider text-white uppercase">
-                        Challenge U1 Core Solution
-                      </span>
                       <span className="text-xs text-[#cba258] font-semibold">
                         GETCO &bull; Gujarat State Electricity Grid
                       </span>
@@ -1276,7 +1271,7 @@ export default function Dashboard() {
                   <div>
                     <div className="text-xs font-bold text-[#1E3932] flex items-center gap-1.5">
                       <CloudRain size={16} className="text-[#00754A]" />
-                      <span>Live Weather Scenario Simulator (Judge Testing Control)</span>
+                      <span>Live Weather Scenario Simulator</span>
                     </div>
                     <p className="text-[11px] text-gray-500">
                       Inject simulated atmospheric events to evaluate dynamic risk escalation and proactive crew re-clustering:
@@ -1860,7 +1855,7 @@ export default function Dashboard() {
                         </span>
                       </div>
                       <div className="flex items-center gap-1 text-[9px] text-[#00754A] font-bold">
-                        <Cpu size={11} /> XGBoost Active
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#00754A] animate-pulse inline-block" /> AI Active
                       </div>
                     </div>
 
@@ -1979,6 +1974,113 @@ export default function Dashboard() {
                   </button>
                 </div>
               </div>
+
+              {/* AI PREDICTOR STUDIO OUTPUT — embedded in Advisor for quick access */}
+              <div className="sb-card p-5">
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center gap-2">
+                    <Cpu size={18} className="text-[#00754A]" />
+                    <div>
+                      <h2 className="text-sm font-bold text-[#1E3932]">AI Predictor Output</h2>
+                      <p className="text-[10px] text-gray-500">Live fault diagnosis for selected grid asset</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab("predictions")}
+                    className="sb-pill-btn sb-btn-outline !py-1 !px-3 text-[11px]"
+                  >
+                    Open Full Studio →
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* LIVE PREDICTION SUMMARY */}
+                  <div className="bg-[#faf9f6] rounded-xl border border-gray-200 p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <span className="text-[10px] font-bold uppercase text-gray-500">Live AI Fault Diagnosis</span>
+                      <span className="bg-[#1E3932] text-white px-2 py-0.5 text-[9px] font-bold rounded-full">
+                        {selectedAssetId}
+                      </span>
+                    </div>
+                    <div className="text-base font-extrabold text-[#1E3932] mb-1">
+                      {livePrediction?.predicted_fault_mode || "No fault detected — monitoring active"}
+                    </div>
+                    <div className="flex items-center gap-3 mb-3">
+                      <span
+                        className={`text-sm font-extrabold ${
+                          (livePrediction?.failure_probability || 0) > 0.6
+                            ? "text-[#c82014]"
+                            : (livePrediction?.failure_probability || 0) > 0.3
+                            ? "text-[#e67e22]"
+                            : "text-[#00754A]"
+                        }`}
+                      >
+                        {livePrediction?.failure_probability
+                          ? `${Math.round(livePrediction.failure_probability * 100)}% Failure Risk`
+                          : "Evaluating..."}
+                      </span>
+                      <span className="text-[10px] text-gray-500">
+                        Window: {livePrediction?.risk_window || "24h"}
+                      </span>
+                    </div>
+                    {livePrediction?.recommended_action && (
+                      <div className="p-2.5 bg-[#d4e9e2]/50 border-l-2 border-[#00754A] rounded-r-lg text-[11px] text-[#1E3932]">
+                        <div className="font-bold text-[10px] uppercase text-[#006241] mb-0.5">Recommended Action:</div>
+                        {livePrediction.recommended_action}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* LAST SIMULATION RESULT (if any) */}
+                  <div className="bg-[#faf9f6] rounded-xl border border-gray-200 p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <span className="text-[10px] font-bold uppercase text-gray-500">Last Manual Prediction</span>
+                      <span className="text-[10px] bg-[#d4e9e2] text-[#006241] font-bold px-2 py-0.5 rounded-full">
+                        AI Inference Engine
+                      </span>
+                    </div>
+                    {simResult ? (
+                      <>
+                        <div className="text-base font-extrabold text-[#1E3932] mb-1">
+                          {simResult.predicted_fault_mode}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                          <div className="bg-white rounded-lg p-2 border border-gray-200 text-center">
+                            <div className="text-[9px] uppercase font-bold text-gray-500">Failure Prob.</div>
+                            <div
+                              className={`text-lg font-extrabold ${
+                                simResult.failure_probability > 0.6
+                                  ? "text-[#c82014]"
+                                  : simResult.failure_probability > 0.3
+                                  ? "text-[#e67e22]"
+                                  : "text-[#00754A]"
+                              }`}
+                            >
+                              {Math.round(simResult.failure_probability * 100)}%
+                            </div>
+                          </div>
+                          <div className="bg-white rounded-lg p-2 border border-gray-200 text-center">
+                            <div className="text-[9px] uppercase font-bold text-gray-500">Health Score</div>
+                            <div className="text-lg font-extrabold text-[#1E3932]">
+                              {Math.round(simResult.health_score || 50)}
+                            </div>
+                          </div>
+                        </div>
+                        {simResult.recommended_action && (
+                          <div className="p-2.5 bg-[#d4e9e2]/50 border-l-2 border-[#00754A] rounded-r-lg text-[11px] text-[#1E3932]">
+                            <div className="font-bold text-[10px] uppercase text-[#006241] mb-0.5">Mitigation:</div>
+                            {simResult.recommended_action}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-[11px] text-gray-400 text-center py-6">
+                        No prediction run yet. Open the AI Predictor Studio to run a manual inference.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -2033,7 +2135,7 @@ export default function Dashboard() {
                 <div>
                   <h1 className="text-base font-bold text-[#1E3932] flex items-center gap-2">
                     <Cpu className="text-[#00754A]" size={20} />
-                    AI Failure Prediction Studio &bull; XGBoost Model Evaluator
+                    AI Failure Prediction Studio
                   </h1>
                   <p className="text-xs text-gray-500 mt-0.5">
                     Real-time inference supporting full 0–100% failure scaling with equipment-specific domain rules.
@@ -2417,7 +2519,7 @@ export default function Dashboard() {
                       className="flex-1 sb-pill-btn sb-btn-primary !py-3 text-sm font-bold shadow-md"
                     >
                       <Play size={16} fill="currentColor" />
-                      {simulating ? "Evaluating XGBoost Decision Trees..." : "Run Real-Time AI Inference"}
+                      {simulating ? "Running AI Inference..." : "Run Real-Time AI Inference"}
                     </button>
                   </div>
                 </div>
@@ -2433,7 +2535,7 @@ export default function Dashboard() {
                         )}
                       </div>
                       <span className="text-[10px] bg-[#d4e9e2] text-[#006241] font-bold px-2 py-0.5 rounded-full">
-                        XGBoost + IEC Engine
+                        AI Inference Engine
                       </span>
                     </div>
 

@@ -176,12 +176,15 @@ def get_prioritised_maintenance_plan(
         db.query(Asset, RiskScore)
         .join(RiskScore, Asset.id == RiskScore.asset_id)
         .join(subq, (RiskScore.asset_id == subq.c.asset_id) & (RiskScore.calculated_at == subq.c.latest))
+        # Pre-filter: only load assets that qualify for any urgency tier (risk >= 35)
+        # This dramatically reduces the result set before Python-side CPI sorting
+        .filter(RiskScore.overall_risk_score >= 35.0)
     )
 
     if district:
         query = query.filter(Asset.district.ilike(f"%{district}%"))
 
-    # Load all candidates without DB-side ordering; re-rank in Python using CPI
+    # Load all at-risk candidates without DB-side ordering; re-rank in Python using CPI
     results_raw = query.all()
 
     # Compute Composite Priority Index (CPI) for each asset — same formula as dashboard.py
