@@ -114,5 +114,23 @@ export async function fetchCrewPrepositioning(weatherEvent?: string) {
   return res.json();
 }
 
+export async function persistWorkOrder(payload: Record<string, any>) {
+  const res = await fetch(`${API_BASE}/planning/work-orders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to persist work order");
+  return res.json();
+}
+
+export async function verifyScadaInterlock(woId: string) {
+  const res = await fetch(`${API_BASE}/planning/work-orders/${woId}/verify-interlock`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to verify SCADA safety interlock");
+  return res.json();
+}
+
 
 

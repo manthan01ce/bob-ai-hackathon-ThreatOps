@@ -201,15 +201,8 @@ def predict_failure(telemetry: Dict[str, Any]) -> Dict[str, Any]:
                 "weight": round(float(imp), 3)
             })
 
-    # Action recommendation
-    if risk_level == "CRITICAL":
-        recommended_action = f"Emergency: Immediate crew dispatch for {predicted_fault_mode}. Switch load to redundant feeder."
-    elif risk_level == "HIGH":
-        recommended_action = f"Warning: Schedule diagnostic inspection within {risk_window}. Monitor operating temperature."
-    elif risk_level == "MEDIUM":
-        recommended_action = f"Advisory: Inspect asset at next maintenance cycle ({risk_window})."
-    else:
-        recommended_action = "Normal: Equipment operating within safe parameters."
+    # IEC 60599 / IEC 60076-7 Physics-based Diagnostic Analysis
+    iec_diagnostics = diagnose_iec60599_and_thermal(input_data, is_tr)
 
     return {
         "model_version": _metadata.get("model_version", "v1.0.0-xgb"),
@@ -223,4 +216,87 @@ def predict_failure(telemetry: Dict[str, Any]) -> Dict[str, Any]:
         "recommended_action": recommended_action,
         "dga_applicable": not is_tr,
         "equipment_type": "Distribution Transformer (TR)" if is_tr else "EHV Substation / Power Plant (SS/PP)",
+        "iec_diagnostics": iec_diagnostics,
     }
+
+
+def diagnose_iec60599_and_thermal(telemetry: Dict[str, Any], is_tr: bool) -> Dict[str, Any]:
+    """
+    Standardized Grid Physics Engine:
+      - Substation Power Transformers: IEC 60599 / Rogers 4-Ratio Gas Diagnostics
+      - Distribution Transformers (TR): IEC 60076-7 Arrhenius Thermal Degradation
+    """
+    if is_tr:
+        temp = float(telemetry.get("temperature", 65.0) or 65.0)
+        oil_temp = float(telemetry.get("oil_temperature", 60.0) or 60.0)
+        hotspot_temp = max(temp, oil_temp + 12.0)
+        
+        # IEC 60076-7 Relative aging rate: V = 2^((hotspot - 98) / 6)
+        aging_exponent = (hotspot_temp - 98.0) / 6.0
+        relative_aging_rate = round(float(2.0 ** min(aging_exponent, 6.0)), 2)
+        
+        if hotspot_temp > 120.0:
+            status = "CRITICAL_THERMAL_EXHAUSTION"
+            desc = f"Hottest-spot temperature {hotspot_temp:.1f}°C exceeds IEC 60076-7 emergency limit (120°C). Insulation paper degrading at {relative_aging_rate}x nominal rate."
+        elif hotspot_temp > 105.0:
+            status = "ACCELERATED_AGING"
+            desc = f"Winding hot-spot {hotspot_temp:.1f}°C indicates sustained overloading. Loss-of-life acceleration factor: {relative_aging_rate}x."
+        else:
+            status = "NORMAL_THERMAL_PROFILE"
+            desc = f"Thermal equilibrium within IEC 60076-7 continuous loading boundaries (Hot-spot {hotspot_temp:.1f}°C, Aging factor: {relative_aging_rate}x)."
+
+        return {
+            "standard": "IEC 60076-7 (Loading guide for oil-immersed power transformers)",
+            "equipment_class": "Distribution Transformer (Hermetically Sealed / Pole Unit)",
+            "hotspot_temperature_c": round(hotspot_temp, 1),
+            "relative_aging_rate": relative_aging_rate,
+            "diagnostic_code": status,
+            "interpretation": desc,
+        }
+    else:
+        h2 = max(0.1, float(telemetry.get("hydrogen", 25.0) or 25.0))
+        ch4 = max(0.1, float(telemetry.get("methane", 35.0) or 35.0))
+        c2h4 = max(0.1, float(telemetry.get("ethylene", 20.0) or 20.0))
+        c2h6 = max(0.1, float(telemetry.get("ethane", 15.0) or 15.0))
+        c2h2 = max(0.01, float(telemetry.get("acetylene", 1.5) or 1.5))
+
+        # Standard IEC 60599 Ratios
+        r1 = round(c2h2 / c2h4, 3)  # C2H2 / C2H4
+        r2 = round(ch4 / h2, 3)     # CH4 / H2
+        r3 = round(c2h4 / c2h6, 3)  # C2H4 / C2H6
+
+        # Classification table
+        if r1 < 0.1 and r2 < 0.1 and r3 < 0.2:
+            code = "PD"
+            fault_desc = "Partial discharge of low energy density (corona ionization in gas cavities or paper voids)"
+        elif r1 > 1.0 and 0.1 <= r2 <= 0.5 and r3 > 1.0:
+            code = "D1"
+            fault_desc = "Discharges of low energy (continuous sparking, pinhole puncture of solid insulation)"
+        elif 0.1 <= r1 <= 1.0 and 0.1 <= r2 <= 1.0 and r3 > 2.0:
+            code = "D2"
+            fault_desc = "Discharges of high energy (power arcing, flashover between turns or to ground)"
+        elif r1 < 0.1 and r2 > 1.0 and r3 < 1.0:
+            code = "T1"
+            fault_desc = "Thermal fault T1: Low temperature local hotspot (<300°C, paper degradation)"
+        elif r1 < 0.1 and r2 > 1.0 and 1.0 <= r3 <= 4.0:
+            code = "T2"
+            fault_desc = "Thermal fault T2: Medium temperature hotspot (300°C - 700°C, copper winding discoloration)"
+        elif r1 < 0.2 and r2 > 1.0 and r3 > 4.0:
+            code = "T3"
+            fault_desc = "Thermal fault T3: Severe high temperature hotspot (>700°C, heavy carbonization of oil and metal)"
+        else:
+            code = "NORMAL"
+            fault_desc = "Gas ratios within permissible IEC 60599 non-critical baseline boundaries"
+
+        return {
+            "standard": "IEC 60599 / IEEE C57.104 Gas Ratio Analysis",
+            "equipment_class": "Substation EHV Power Transformer",
+            "rogers_ratios": {
+                "c2h2_c2h4": r1,
+                "ch4_h2": r2,
+                "c2h4_c2h6": r3,
+            },
+            "diagnostic_code": code,
+            "interpretation": fault_desc,
+        }
+

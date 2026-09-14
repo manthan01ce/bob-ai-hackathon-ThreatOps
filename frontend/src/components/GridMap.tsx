@@ -45,12 +45,14 @@ interface GridMapProps {
   }>;
   selectedAssetId?: string;
   onSelectAsset?: (assetId: string) => void;
+  weatherScenario?: string;
 }
 
 export default function GridMap({
   markers = [],
   selectedAssetId,
   onSelectAsset,
+  weatherScenario = "normal_scada",
 }: GridMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -58,10 +60,12 @@ export default function GridMap({
   const markersLayerRef = useRef<any>(null);
   const linesLayerRef = useRef<any>(null);
   const selectedMarkerLayerRef = useRef<any>(null);
+  const heatmapLayerRef = useRef<any>(null);
   const tileLayerRef = useRef<any>(null);
 
   const [currentStyle, setCurrentStyle] = useState<string>("voyager");
   const [showPowerLines, setShowPowerLines] = useState<boolean>(true);
+  const [showOutageHeatmap, setShowOutageHeatmap] = useState<boolean>(true);
 
   const onSelectRef = useRef(onSelectAsset);
   onSelectRef.current = onSelectAsset;
@@ -225,6 +229,9 @@ export default function GridMap({
       tileLayerRef.current = baseTile;
 
       // Layer groups
+      const heatmapGroup = L.layerGroup().addTo(map);
+      heatmapLayerRef.current = heatmapGroup;
+
       const linesGroup = L.layerGroup().addTo(map);
       linesLayerRef.current = linesGroup;
 
@@ -235,7 +242,21 @@ export default function GridMap({
       selectedMarkerLayerRef.current = selectedGroup;
 
       // Render content
-      renderCanvasLayers(L, map, canvasRenderer, markersGroup, linesGroup, selectedGroup, markers, selectedRef.current, showPowerLines, transmissionLines);
+      renderCanvasLayers(
+        L,
+        map,
+        canvasRenderer,
+        markersGroup,
+        linesGroup,
+        selectedGroup,
+        heatmapGroup,
+        markers,
+        selectedRef.current,
+        showPowerLines,
+        transmissionLines,
+        showOutageHeatmap,
+        weatherScenario
+      );
 
       // Invalidate layout dimensions safely
       setTimeout(() => {
@@ -280,18 +301,104 @@ export default function GridMap({
     markersGroup: any,
     linesGroup: any,
     selectedGroup: any,
+    heatmapGroup: any,
     items: typeof markers,
     selectedId: string | undefined,
     drawLines: boolean,
-    linesData: Array<[[number, number], [number, number]]>
+    linesData: Array<[[number, number], [number, number]]>,
+    drawHeatmap: boolean,
+    weather: string
   ) => {
     if (!markersGroup || !linesGroup || !selectedGroup || !renderer) return;
 
     markersGroup.clearLayers();
     linesGroup.clearLayers();
     selectedGroup.clearLayers();
+    if (heatmapGroup) heatmapGroup.clearLayers();
 
     if (!items || items.length === 0) return;
+
+    // 0. Draw Outage Vulnerability Heatmap Isochrone Polygons
+    if (drawHeatmap && heatmapGroup) {
+      const isCyclone = weather === "cyclone_warning";
+      const isHeatwave = weather === "heatwave_alert";
+      const isMonsoon = weather === "monsoon_storm";
+
+      const zones = [
+        {
+          name: "Kutch Cyclone & High-Wind Storm Corridor",
+          district: "Kutch",
+          coords: [
+            [23.95, 68.80],
+            [24.15, 70.80],
+            [23.10, 71.30],
+            [22.70, 69.50],
+            [23.10, 68.70],
+          ],
+          color: isCyclone ? "#c82014" : "#e67e22",
+          fillOpacity: isCyclone ? 0.35 : 0.14,
+          label: isCyclone ? "⚡ P1 CRITICAL OUTAGE RISK: 110 km/h Gale Surge" : "Moderate High-Wind Corridor",
+        },
+        {
+          name: "Saurashtra Coastal Grid & Salinity Infiltration Belt",
+          district: "Jamnagar / Rajkot / Bhavnagar",
+          coords: [
+            [22.60, 70.00],
+            [22.80, 71.50],
+            [21.70, 72.30],
+            [20.80, 71.20],
+            [21.50, 69.40],
+          ],
+          color: isCyclone ? "#c82014" : "#cba258",
+          fillOpacity: isCyclone ? 0.30 : 0.12,
+          label: isCyclone ? "⚡ SEVERE GALE ALERT: Bushing Flashover Threat" : "Coastal Salinity Monitoring Zone",
+        },
+        {
+          name: "Ahmedabad-Gandhinagar Industrial & Metro Core",
+          district: "Ahmedabad / Gandhinagar",
+          coords: [
+            [23.35, 72.35],
+            [23.35, 72.85],
+            [22.75, 72.85],
+            [22.75, 72.35],
+          ],
+          color: isHeatwave ? "#c82014" : "#e67e22",
+          fillOpacity: isHeatwave ? 0.35 : 0.15,
+          label: isHeatwave ? "🔥 PEAK THERMAL EXHAUSTION: 46.5°C Ambient" : "High-Density Load Sector",
+        },
+        {
+          name: "South Gujarat Dahej-Surat PCPIR Heavy Corridor",
+          district: "Bharuch / Surat",
+          coords: [
+            [22.00, 72.50],
+            [22.00, 73.30],
+            [21.00, 73.10],
+            [21.00, 72.60],
+          ],
+          color: isMonsoon ? "#c82014" : "#00754A",
+          fillOpacity: isMonsoon ? 0.35 : 0.12,
+          label: isMonsoon ? "⛈️ FLASH FLOODING ALERT: Substation Submersion Risk" : "Normal Industrial Baselines",
+        },
+      ];
+
+      zones.forEach((z) => {
+        const poly = L.polygon(z.coords, {
+          color: z.color,
+          weight: 2,
+          fillColor: z.color,
+          fillOpacity: z.fillOpacity,
+          dashArray: "5, 5",
+        });
+        poly.bindTooltip(
+          `<div style="font-family: sans-serif; font-size: 11px; padding: 3px;">
+            <b style="color: #1E3932;">${z.name}</b><br/>
+            <span style="color: ${z.color}; font-weight: 700;">${z.label}</span>
+          </div>`,
+          { sticky: true }
+        );
+        heatmapGroup.addLayer(poly);
+      });
+    }
 
     // 1. Draw transmission lines directly onto the GPU Canvas
     if (drawLines && linesData.length > 0) {
@@ -419,7 +526,7 @@ export default function GridMap({
     }
   }, [selectedAssetId, markers, buildPopupContent]);
 
-  // Update canvas markers when markers, selectedAssetId, or lines toggle change
+  // Update canvas markers when markers, selectedAssetId, or toggles change
   useEffect(() => {
     if (!mapInstanceRef.current || !markersLayerRef.current || !canvasRendererRef.current) return;
     import("leaflet").then((leafletModule) => {
@@ -431,13 +538,16 @@ export default function GridMap({
         markersLayerRef.current,
         linesLayerRef.current,
         selectedMarkerLayerRef.current,
+        heatmapLayerRef.current,
         markers,
         selectedAssetId,
         showPowerLines,
-        transmissionLines
+        transmissionLines,
+        showOutageHeatmap,
+        weatherScenario
       );
     });
-  }, [markers, selectedAssetId, showPowerLines, transmissionLines]);
+  }, [markers, selectedAssetId, showPowerLines, transmissionLines, showOutageHeatmap, weatherScenario]);
 
   // Zoom In / Out Handlers
   const handleZoomIn = () => {
@@ -550,6 +660,15 @@ export default function GridMap({
           }`}
         >
           ⚡ Grid: {showPowerLines ? "ON" : "OFF"}
+        </button>
+        <button
+          onClick={() => setShowOutageHeatmap(!showOutageHeatmap)}
+          className={`px-3 py-1 text-[10px] font-bold uppercase rounded-full border transition-all active:scale-95 ${
+            showOutageHeatmap ? "bg-[#faf6ee] text-[#cba258] border-[#cba258]" : "text-gray-500 border-gray-300"
+          }`}
+          title="Toggle Area Outage Vulnerability Shading"
+        >
+          🔥 Heatmap: {showOutageHeatmap ? "ON" : "OFF"}
         </button>
       </div>
 

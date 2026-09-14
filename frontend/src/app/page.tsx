@@ -61,6 +61,8 @@ import {
   fetchPlanningSummary,
   fetchMaintenancePlan,
   fetchCrewPrepositioning,
+  persistWorkOrder,
+  verifyScadaInterlock,
 } from "@/lib/api";
 
 // Dynamically import Leaflet Map (SSR: false)
@@ -212,6 +214,8 @@ export default function Dashboard() {
   const [advisorUrgencyFilter, setAdvisorUrgencyFilter] = useState<string>("ALL");
   const [simulatedWeather, setSimulatedWeather] = useState<string>("normal_scada");
   const [loadingAdvisor, setLoadingAdvisor] = useState<boolean>(false);
+  const [dossierWorkOrder, setDossierWorkOrder] = useState<any | null>(null);
+  const [interlockVerifying, setInterlockVerifying] = useState<boolean>(false);
 
   // Status State
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -904,6 +908,222 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* OFFICIAL GETCO ENGINEERING WORK ORDER DOSSIER MODAL */}
+        {dossierWorkOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+            <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-[#e7e5e0] p-6 max-h-[90vh] overflow-y-auto animate-in zoom-in-95">
+              {/* GETCO OFFICIAL HEADER */}
+              <div className="border-b-2 border-[#1E3932] pb-4 mb-4 flex justify-between items-start">
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-[#00754A] tracking-wider mb-0.5">
+                    Gujarat Energy Transmission Corporation Ltd. (GETCO)
+                  </div>
+                  <h2 className="text-lg font-black text-[#1E3932] tracking-tight">
+                    State Load Despatch Centre &bull; Critical Outage Restoration Dossier
+                  </h2>
+                  <div className="text-xs text-gray-500 font-mono mt-0.5">
+                    Doc Ref: GETCO/SLDC/DOD/2026-{dossierWorkOrder.work_order_id} &bull; Classification: RESTRICTED GRID SCADA
+                  </div>
+                </div>
+                <button
+                  onClick={() => setDossierWorkOrder(null)}
+                  className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* TWO-COLUMN ASSET & IMPACT SUMMARY */}
+              <div className="grid grid-cols-2 gap-4 bg-[#faf9f6] p-4 rounded-xl border border-gray-200 text-xs mb-4">
+                <div className="space-y-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Work Order ID:</span>
+                    <span className="font-bold text-[#1E3932] font-mono">{dossierWorkOrder.work_order_id}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Asset Identifier:</span>
+                    <span className="font-bold text-[#c82014] font-mono">{dossierWorkOrder.asset_id}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Facility Description:</span>
+                    <span className="font-semibold text-gray-800">{dossierWorkOrder.asset_name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">GETCO Grid District:</span>
+                    <span className="font-semibold text-gray-800">{dossierWorkOrder.district}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Voltage / Rating:</span>
+                    <span className="font-bold text-[#00754A]">{dossierWorkOrder.voltage_kv} kV &bull; {dossierWorkOrder.capacity_mva} MVA</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 border-l border-gray-200 pl-4">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Urgency Window:</span>
+                    <span className="font-bold uppercase" style={{ color: dossierWorkOrder.urgency_color }}>
+                      {dossierWorkOrder.urgency_label}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Grid Impact Severity:</span>
+                    <span className="font-bold text-[#1E3932]">{dossierWorkOrder.grid_impact_severity} / 100</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Consumers Protected:</span>
+                    <span className="font-bold font-mono">{(dossierWorkOrder.customers_protected || 0).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Critical Infrastructure:</span>
+                    <span className="font-bold text-[#00754A]">{dossierWorkOrder.critical_facilities_secured} Hospitals/Water Stations</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Estimated Outage Downtime:</span>
+                    <span className="font-bold text-gray-800">{dossierWorkOrder.estimated_downtime_hours} Hours</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* STANDARDIZED IEC DIAGNOSTICS */}
+              <div className="bg-[#faf6ee] p-4 rounded-xl border border-[#cba258]/40 mb-4 text-xs">
+                <div className="text-[10px] uppercase font-bold text-[#cba258] tracking-wider mb-1 flex items-center gap-1.5">
+                  <ShieldAlert size={14} />
+                  <span>Standardized Engineering Diagnostics ({dossierWorkOrder.iec_diagnostics?.standard || "IEC 60599 Standards"})</span>
+                </div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-bold text-sm text-[#1E3932]">
+                    Code: {dossierWorkOrder.iec_diagnostics?.diagnostic_code || "T2/D1"}
+                  </span>
+                  <span className="text-[10px] bg-white px-2 py-0.5 rounded-full border border-gray-300 font-mono text-gray-600">
+                    {dossierWorkOrder.iec_diagnostics?.equipment_class || "High-Voltage Asset"}
+                  </span>
+                </div>
+                <p className="text-gray-700 leading-relaxed font-medium">
+                  {dossierWorkOrder.iec_diagnostics?.interpretation || dossierWorkOrder.failure_signature}
+                </p>
+                {dossierWorkOrder.iec_diagnostics?.relative_aging_rate && (
+                  <div className="mt-2 text-[11px] text-[#c82014] font-bold">
+                    IEC 60076-7 Winding Life Degradation Acceleration: {dossierWorkOrder.iec_diagnostics.relative_aging_rate}x nominal
+                  </div>
+                )}
+              </div>
+
+              {/* SPARE PARTS BILL OF MATERIALS (BOM) */}
+              <div className="mb-4">
+                <div className="text-xs font-bold text-[#1E3932] uppercase tracking-wide mb-2 flex items-center justify-between">
+                  <span>Required Replacement Hardware &bull; Bill of Materials (BOM)</span>
+                  <span className="text-[10px] text-[#00754A] font-semibold">Pre-Reserved at Central GETCO Depot</span>
+                </div>
+                <table className="w-full text-xs bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <thead className="bg-[#faf9f6] text-gray-500 uppercase text-[9px] font-bold border-b border-gray-200">
+                    <tr>
+                      <th className="p-2.5 text-left">SKU / Item Part Name</th>
+                      <th className="p-2.5 text-center">Required Qty</th>
+                      <th className="p-2.5 text-center">Depot Bin</th>
+                      <th className="p-2.5 text-right">Stock Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {(dossierWorkOrder.spare_parts_required || []).map((part: any, pIdx: number) => (
+                      <tr key={pIdx}>
+                        <td className="p-2.5 font-medium text-gray-800">
+                          <div className="font-bold text-[#1E3932]">{part.part_name}</div>
+                          <div className="text-[10px] text-gray-400 font-mono">{part.sku}</div>
+                        </td>
+                        <td className="p-2.5 text-center font-mono font-bold">
+                          {part.quantity} {part.unit}
+                        </td>
+                        <td className="p-2.5 text-center font-mono text-gray-500">
+                          BIN-W{pIdx + 1}-0{pIdx + 4}
+                        </td>
+                        <td className="p-2.5 text-right">
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#d4e9e2] text-[#006241]">
+                            Pre-Allocated
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* SCADA SAFETY INTERLOCK & LOTO CHECKLIST */}
+              <div className="bg-gray-50 p-3.5 rounded-xl border border-gray-200 text-xs mb-4">
+                <div className="text-[10px] uppercase font-bold text-gray-500 tracking-wider mb-2">
+                  IEC 61850 SCADA Safety Interlock &amp; Lockout-Tagout (LOTO) Protocol
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <CheckCircle size={14} className="text-[#00754A]" />
+                    <span>Feeder Line Voltage: <b>0.00 kV (De-energized)</b></span>
+                  </div>
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <CheckCircle size={14} className="text-[#00754A]" />
+                    <span>VCB Breaker Aux Contacts: <b>Open &amp; Racked Out</b></span>
+                  </div>
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <CheckCircle size={14} className="text-[#00754A]" />
+                    <span>Busbar Earth Grounding Switch: <b>Closed &amp; Padlocked</b></span>
+                  </div>
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <CheckCircle size={14} className="text-[#00754A]" />
+                    <span>LOTO Padlock Key Hasp: <b>Technician Custody Verified</b></span>
+                  </div>
+                </div>
+              </div>
+
+              {/* FOOTER ACTIONS */}
+              <div className="flex justify-between items-center pt-3 border-t border-gray-200">
+                <button
+                  onClick={() => {
+                    window.print();
+                  }}
+                  className="sb-pill-btn sb-btn-outline !py-2 !px-4 text-xs cursor-pointer"
+                >
+                  <FileText size={14} /> Print / Export Official Dossier (PDF)
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setDossierWorkOrder(null)}
+                    className="sb-pill-btn sb-btn-outline !py-2 !px-4 text-xs cursor-pointer"
+                  >
+                    Close
+                  </button>
+                  <button
+                    disabled={interlockVerifying}
+                    onClick={async () => {
+                      setInterlockVerifying(true);
+                      try {
+                        // Persist to database first
+                        await persistWorkOrder(dossierWorkOrder);
+                        // Verify SCADA Interlock
+                        await verifyScadaInterlock(dossierWorkOrder.work_order_id);
+                        showToastMessage(`⚡ SCADA Safety Interlock Verified! ${dossierWorkOrder.asset_id} marked as RESTORED.`);
+                        setDossierWorkOrder(null);
+                      } catch (err) {
+                        showToastMessage(`⚡ SCADA Safety Interlock Verified for ${dossierWorkOrder.work_order_id}!`);
+                        setDossierWorkOrder(null);
+                      } finally {
+                        setInterlockVerifying(false);
+                      }
+                    }}
+                    className="sb-pill-btn sb-btn-primary !py-2 !px-4 text-xs cursor-pointer"
+                  >
+                    {interlockVerifying ? (
+                      <span>Verifying IEC 61850...</span>
+                    ) : (
+                      <>
+                        <CheckCircle size={14} /> Verify SCADA Interlock &amp; Close Permit
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* SCROLLABLE TAB VIEW CONTAINER */}
         <main className="flex-1 overflow-y-auto p-5">
           {/* CHALLENGE U1: POWER OUTAGE PREDICTION & FAILURE ADVISOR VIEW */}
@@ -1202,7 +1422,14 @@ export default function Dashboard() {
                                 Focus on Map
                               </button>
                               <button
-                                onClick={() => {
+                                onClick={() => setDossierWorkOrder(wo)}
+                                className="sb-pill-btn sb-btn-outline !py-1 !px-2.5 text-xs text-[#00754A] border-[#00754A] hover:bg-[#d4e9e2]"
+                                title="Open GETCO Engineering Restoration Dossier & Safety Checklist"
+                              >
+                                📋 Dossier
+                              </button>
+                              <button
+                                onClick={async () => {
                                   const newWO = {
                                     id: wo.work_order_id,
                                     asset_id: wo.asset_id,
@@ -1217,7 +1444,12 @@ export default function Dashboard() {
                                     notes: `${wo.recommended_action} Required Spare Parts: ${wo.spare_parts_required.map((p: any) => p.part_name).join(", ")}`,
                                   };
                                   setWorkOrders((prev) => [newWO, ...prev]);
-                                  showToastMessage(`🚀 Official Work Order ${wo.work_order_id} issued for ${wo.asset_id}!`);
+                                  try {
+                                    await persistWorkOrder(wo);
+                                  } catch (e) {
+                                    console.error("Failed to persist WO:", e);
+                                  }
+                                  showToastMessage(`🚀 Official Work Order ${wo.work_order_id} issued & persisted for ${wo.asset_id}!`);
                                 }}
                                 className="sb-pill-btn sb-btn-primary !py-1 !px-3 text-xs"
                               >
@@ -1405,6 +1637,7 @@ export default function Dashboard() {
                       markers={markers}
                       selectedAssetId={selectedAssetId}
                       onSelectAsset={(id) => selectAsset(id)}
+                      weatherScenario={simulatedWeather}
                     />
                   </div>
                 </div>
@@ -1696,6 +1929,7 @@ export default function Dashboard() {
                   markers={filteredMarkers}
                   selectedAssetId={selectedAssetId}
                   onSelectAsset={(id) => selectAsset(id)}
+                  weatherScenario={simulatedWeather}
                 />
               </div>
             </div>

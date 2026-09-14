@@ -208,3 +208,24 @@ class Crew(Base):
     available = Column(Boolean, default=True)
     skill_level = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class WorkOrderRecord(Base):
+    __tablename__ = "work_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(String(50), unique=True, index=True)
+    asset_id = Column(String(50), index=True)
+    asset_type = Column(String(50))
+    district = Column(String(100))
+    urgency = Column(String(50))
+    priority = Column(String(50))
+    failure_signature = Column(String(200))
+    recommended_action = Column(Text)
+    spare_parts_json = Column(Text)
+    status = Column(String(50), default="DISPATCHED")  # DRAFT, DISPATCHED, IN_TRANSIT, ON_SITE, VERIFIED_RESTORED
+    assigned_crew = Column(String(100))
+    scada_interlock_verified = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    closed_at = Column(DateTime, nullable=True)
+
