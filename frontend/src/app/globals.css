@@ -5,15 +5,15 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Starbucks Design System Tokens */
+  /* ThreatOps Industrial SCADA Design System Tokens */
   --canvas: #f2f0eb;              /* Neutral Warm Canvas */
   --canvas-ceramic: #edebe9;      /* Ceramic off-white */
   --surface-card: #ffffff;        /* Crisp White Content Cards */
   --surface-subtle: #f9f9f9;      /* Neutral Cool */
   
   --house-green: #1E3932;         /* Deep House Green (nav, hero bands, dark panels) */
-  --starbucks-green: #006241;     /* Historic Starbucks Brand Green */
-  --green-accent: #00754A;        /* Green Accent (Primary CTAs, Frap button) */
+  --brand-green: #006241;         /* Industrial SCADA Brand Green */
+  --green-accent: #00754A;        /* Green Accent (Primary CTAs, Action button) */
   --green-uplift: #2b5148;        /* Green Uplift (mid-dark decorative) */
   --green-light: #d4e9e2;         /* Pale Mint Wash (tags, safe badges) */
   
@@ -43,7 +43,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Starbucks 12px Content Cards with Whisper-Soft Dual-Shadow */
+/* Industrial 12px Content Cards with Whisper-Soft Dual-Shadow */
 .sb-card {
   background: #ffffff;
   border-radius: 12px;
@@ -59,7 +59,7 @@ body {
   color: #ffffff;
 }
 
-/* Universal Starbucks 50px Full-Pill Buttons with scale(0.95) Active Press */
+/* Universal Industrial 50px Full-Pill Buttons with scale(0.95) Active Press */
 .sb-pill-btn {
   border-radius: 50px;
   padding: 8px 18px;

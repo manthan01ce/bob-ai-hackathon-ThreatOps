@@ -8,9 +8,8 @@ const MAPTILER_KEY = "CRFoY3RXgAloQLarTcRL";
 // High-performance tile styles with pre-buffered caching
 const TILE_STYLES: Record<string, { name: string; url: string; subdomains?: string[]; maxZoom: number }> = {
   voyager: {
-    name: "Cream SCADA (Fast)",
-    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    subdomains: ["a", "b", "c", "d"],
+    name: "Cream SCADA (Licensed)",
+    url: `https://api.maptiler.com/maps/voyager/256/{z}/{x}/{y}.png?key=${MAPTILER_KEY}`,
     maxZoom: 19,
   },
   dataviz: {
@@ -114,7 +113,7 @@ export default function GridMap({
     return lines;
   }, [markers]);
 
-  // Construct Starbucks Themed Inspector Popup HTML on demand
+  // Construct Industrial Inspector Popup HTML on demand
   const buildPopupContent = useCallback((asset: any) => {
     const risk = (asset.risk_level || "MEDIUM").toUpperCase();
     const color =
@@ -187,7 +186,7 @@ export default function GridMap({
         zoom: 7.5,
         minZoom: 6,
         maxZoom: 18,
-        zoomControl: false, // Sleek custom Starbucks zoom controls
+        zoomControl: false, // Sleek custom industrial zoom controls
         attributionControl: false,
         preferCanvas: true, // Forces GPU Canvas acceleration for 60fps rendering
         // Kinetic momentum & smooth swiping:

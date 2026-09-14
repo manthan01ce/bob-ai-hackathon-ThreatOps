@@ -88,5 +88,31 @@ export async function fetchSensorStream(limit: number = 40) {
   return res.json();
 }
 
+// Challenge U1 Planning & Advisor APIs
+export async function fetchPlanningSummary() {
+  const res = await fetch(`${API_BASE}/planning/summary`);
+  if (!res.ok) throw new Error("Failed to fetch planning summary");
+  return res.json();
+}
+
+export async function fetchMaintenancePlan(urgencyFilter?: string, district?: string) {
+  let url = `${API_BASE}/planning/maintenance-plan?limit=60`;
+  if (urgencyFilter && urgencyFilter !== "ALL") url += `&urgency_filter=${urgencyFilter}`;
+  if (district) url += `&district=${encodeURIComponent(district)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch maintenance plan");
+  return res.json();
+}
+
+export async function fetchCrewPrepositioning(weatherEvent?: string) {
+  let url = `${API_BASE}/planning/crew-prepositioning`;
+  if (weatherEvent && weatherEvent !== "normal_scada") {
+    url += `?simulate_weather_event=${weatherEvent}`;
+  }
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch crew prepositioning");
+  return res.json();
+}
+
 
 

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import engine
 from app.models import models
-from app.api import assets, sensors, weather, incidents, predictions, risks, dashboard, crews
+from app.api import assets, sensors, weather, incidents, predictions, risks, dashboard, crews, planning
 
 # Create all tables on startup
 models.Base.metadata.create_all(bind=engine)
@@ -26,6 +26,7 @@ app.include_router(predictions.router, prefix="/api/predictions", tags=["Predict
 app.include_router(risks.router,       prefix="/api/risks",       tags=["Risks"])
 app.include_router(dashboard.router,   prefix="/api/dashboard",   tags=["Dashboard"])
 app.include_router(crews.router,       prefix="/api/crews",       tags=["Crews"])
+app.include_router(planning.router,    prefix="/api/planning",    tags=["Planning"])
 
 
 
